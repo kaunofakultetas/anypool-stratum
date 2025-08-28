@@ -27,7 +27,7 @@ services:
   ltc-testnet4-stratum:
     container_name: ltc-testnet4-stratum
     build:
-      context: ./stratum
+      context: ./anypool-stratum
       dockerfile: Dockerfile
     ports:
       - "3333:3333"

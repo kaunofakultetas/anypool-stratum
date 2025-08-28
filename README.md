@@ -56,7 +56,7 @@ For now, only Litecoin testnet is supported.
 | `COINBASE_MESSAGE` | Custom message embedded in mined blocks | "/AnyPool by VU Kaunas faculty/" | ❌ |
 | `STRATUM_PORT` | Port for the stratum server | 3333 | ❌ |
 | `POOL_DIFFICULTY` | Mining difficulty | 2048 | ❌ |
-| `POLL_DIFF_DROPPER`| Drop difficultyfor miners if network difficulty is suddenly drops even lower then pool's difficulty | false | ❌ |
+| `POLL_DIFF_DROPPER`| Drop difficulty for miners if network difficulty suddenly drops even lower then pool's fixed difficulty | false | ❌ |
 
 <br/>
 
