@@ -1,0 +1,43 @@
+services:
+
+  ltc-testnet4-litecoind:
+    container_name: ltc-testnet4-litecoind
+    image: btcpayserver/litecoin:0.21.2.1-2
+    volumes:
+      - ./litecoin_testnet:/data
+    command:
+      [
+        "litecoind",
+        "-testnet=1",
+        "-server=1",
+        "-rpcuser=admin",
+        "-rpcpassword=admin",
+        "-rpcallowip=172.0.0.0/8",
+        "-rpcport=19332",
+        "-rpcbind=0.0.0.0",
+        "-zmqpubrawtx=tcp://0.0.0.0:29332",
+        "-zmqpubrawblock=tcp://0.0.0.0:29332",
+        "-dbcache=512",
+        "-assumevalid=00000000",
+        "-checkblocks=288"
+      ]
+    restart: unless-stopped
+
+
+  ltc-testnet4-stratum:
+    container_name: ltc-testnet4-stratum
+    build:
+      context: ./stratum
+      dockerfile: Dockerfile
+    ports:
+      - "3333:3333"
+    environment:
+      - RPC_HOST=ltc-testnet4-litecoind
+      - RPC_PORT=19332
+      - RPC_USER=admin
+      - RPC_PASS=admin
+      - REWARD_ADDR=<Your LTC testnet addr (native segwit)>
+      - COINBASE_MESSAGE=/AnyPool by VU Kaunas faculty/
+      - DEBUG=False
+    restart: unless-stopped
+
