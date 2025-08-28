@@ -38,6 +38,26 @@ services:
       - RPC_PASS=admin
       - REWARD_ADDR=<Your LTC testnet addr (native segwit)>
       - COINBASE_MESSAGE=/AnyPool by VU Kaunas faculty/
+      - POOL_DIFFICULTY=2048
+      - POLL_DIFF_DROPPER=False
       - DEBUG=False
+    restart: unless-stopped
+
+
+  # OPTIONAL: If you want to mine with your external miner, comment this section out.
+  ltc-testnet4-miner:
+    container_name: ltc-testnet4-advanced-miner
+    image: fabriziogaliano/docker-cpuminer:v1.0.0
+    command: [
+      "--algo", "scrypt",
+      "--url", "stratum+tcp://ltc-testnet4-stratum:3333",
+       "--user", "testminer.worker1",
+      "--pass", "x",
+      "--threads", "4",
+      "--retry-pause", "5",
+      "--timeout", "60",
+      "--debug",
+      "--protocol-dump"
+    ]
     restart: unless-stopped
 

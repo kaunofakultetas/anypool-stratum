@@ -27,8 +27,6 @@ REWARD_ADDR = os.getenv("REWARD_ADDR")
 STRATUM_PORT = int(os.getenv("STRATUM_PORT", "3333"))
 POOL_DIFFICULTY = int(os.getenv("POOL_DIFFICULTY", "2048"))
 POLL_DIFF_DROPPER = os.getenv("POLL_DIFF_DROPPER", "false").lower() == "true"
-POLL_DIFF_DROPPER = True
-
 COINBASE_MESSAGE = os.getenv("COINBASE_MESSAGE", "/AnyPool by VU Kaunas faculty/")
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
