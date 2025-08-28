@@ -1,6 +1,6 @@
 #!/bin/bash
 
-mkdir -p ./litecoin_testnet
+mkdir -p ./litecoind/data
 
 # Run the stack
 sudo docker-compose down --timeout 60

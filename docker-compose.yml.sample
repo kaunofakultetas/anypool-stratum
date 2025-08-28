@@ -4,7 +4,7 @@ services:
     container_name: ltc-testnet4-litecoind
     image: btcpayserver/litecoin:0.21.2.1-2
     volumes:
-      - ./litecoin_testnet:/data
+      - ./litecoind/data:/data
     command:
       [
         "litecoind",
@@ -18,8 +18,8 @@ services:
         "-zmqpubrawtx=tcp://0.0.0.0:29332",
         "-zmqpubrawblock=tcp://0.0.0.0:29332",
         "-dbcache=512",
-        "-assumevalid=00000000",
-        "-checkblocks=288"
+        "-prune=550",
+        "-checkblocks=6"
       ]
     restart: unless-stopped
 
