@@ -4,6 +4,11 @@ A Stratum protocol to Full Node RPC adapter for mining.
 
 ![Coin](https://img.shields.io/badge/Coin-Litecoin_Testnet-green.svg)
 
+<img height="400" alt="Screenshot 2025-08-28 at 11 11 10" src="https://github.com/user-attachments/assets/40e3d601-2dbf-4205-92d5-7e8698100142" /> <img height="400" alt="Screenshot 2025-08-28 at 11 10 48" src="https://github.com/user-attachments/assets/10b26542-ee7e-43ce-a596-e80da10aebfd" />
+<br/>
+
+
+
 # ❌ DO NOT USE IN PRODUCTION! ❌ <br/> ❌ DEVELOPMENT IN PROGRESS! ❌
 
 <br/>
