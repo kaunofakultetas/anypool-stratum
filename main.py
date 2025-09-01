@@ -66,11 +66,47 @@ class StratumUtils:
 
 
 
-
     @staticmethod
     def reverse_hex(hex_str: str) -> str:
-        """Reverse hex string in 2-char chunks"""
+        """
+        Reverse hex string in 2-char chunks
+
+        INPUT:
+        +---------------------------------------+
+        | 01 | 23 | 45 | 67 | 89 | AB | CD | EF |
+        +---------------------------------------+
+            
+        OUTPUT:
+        +---------------------------------------+
+        | EF | CD | AB | 89 | 67 | 45 | 23 | 01 |
+        +---------------------------------------+
+        """
         return ''.join(reversed([hex_str[i:i+2] for i in range(0, len(hex_str), 2)]))
+
+
+
+    @staticmethod
+    def reverse_hex_4b_chunks(hex_str: str) -> str:
+        """
+        Reverse hex string in 4-byte chunks
+        
+        INPUT:
+        +---------------------------------------------------------------------------------------+
+        | 01234567 | 89ABCDEF | 76543210 | FEDCBA98 | 0123ABCD | EF012345 | 6789ABCD | FEDCBA98 |
+        +---------------------------------------------------------------------------------------+
+              |         |          |          |          |          |          |          |
+            FLIP      FLIP       FLIP       FLIP       FLIP       FLIP       FLIP       FLIP
+              V         |          |          |          |          |          |          |
+        OUTPUT:         V          V          V          V          V          V          V
+        +---------------------------------------------------------------------------------------+
+        | 67452301 | EFCDAB89 | 10325476 | 98BCDCFE | CDAB2301 | 452301EF | CDAB8967 | 98BADCFE |
+        +---------------------------------------------------------------------------------------+
+        """
+        hex_str_final = ""
+        for i in range(0, 64, 8):  # Process 4-byte chunks (8 hex chars each)
+            chunk = hex_str[i:i+8]
+            hex_str_final += StratumUtils.reverse_hex(chunk)
+        return hex_str_final
 
 
 
@@ -206,7 +242,6 @@ class ShareValidator:
 
 
 
-
         # Step 2: Calculate merkle root using LE format
         merkle_root_le = MerkleTree.calculate_merkle_root_from_branch(
             coinbase_txid_le, job["merkle_branch"], 0
@@ -229,32 +264,24 @@ class ShareValidator:
 
 
 
-        
         # Step 3: Build header using simplified mixed endianness method
-        # Based on discovered pattern: LE/BE/LE/BE/LE/BE processing per field
-        version_final = StratumUtils.reverse_hex(job["version"])   # Version: LE processing (no change needed)
-        
-        # PrevHash: BE processing (reverse each 4-byte chunk)
-        prevhash_final = ""
-        for i in range(0, 64, 8):  # Process 4-byte chunks (8 hex chars each)
-            chunk = job["prevhash"][i:i+8]
-            prevhash_final += StratumUtils.reverse_hex(chunk)
-
-        
+        version_final = StratumUtils.reverse_hex(job["version"])
+        prevhash_final = StratumUtils.reverse_hex_4b_chunks(job["prevhash"])
         merkle_final = merkle_root_binary.hex()
         ntime_final = StratumUtils.reverse_hex(ntime)
         nbits_final = StratumUtils.reverse_hex(job["nbits"])
         nonce_final = StratumUtils.reverse_hex(nonce)
         
 
+
         # Step 4: Build header using simple hex concatenation
         header_hex = version_final + prevhash_final + merkle_final + ntime_final + nbits_final + nonce_final
         header_bytes = bytes.fromhex(header_hex)
 
 
+
         # Step 5: Calculate the Scrypt hash
         scrypt_hash_hex = StratumUtils.ltc_pow_hash(header_bytes)
-
 
         if(DEBUG):
             print(
@@ -647,10 +674,7 @@ class StratumServer:
             # Previous hash: getblocktemplate returns big-endian, we need little-endian for header
             prevhash_be = template["previousblockhash"]
             prevhash_le = StratumUtils.reverse_hex(prevhash_be)
-            prevhash_final = ""
-            for i in range(0, 64, 8):  # Process 4-byte chunks (8 hex chars each)
-                chunk = prevhash_le[i:i+8]
-                prevhash_final += StratumUtils.reverse_hex(chunk)
+            prevhash_final = StratumUtils.reverse_hex_4b_chunks(prevhash_le)
 
             version_be = f"{template['version']:08x}"
             nbits_be = f"{int(template["bits"], 16):08x}"
@@ -658,6 +682,7 @@ class StratumServer:
 
 
 
+            
             # Step 2: Check if the proposed block from full node has the same data as the current job
             #         We need to avoid creating a new job if the block hasn't changed
             #         If nothing has changed, we can just return the current job
@@ -767,7 +792,7 @@ class StratumServer:
                 old_merkle = self.jobs[job_id].get('merkle_branch', [])
                 print(f"[WARNING] Overwriting existing job {job_id}!")
                 print(f"[WARNING] Old merkle: {old_merkle}")
-                print(f"[WARNING] New merkle: {merkle_branch}")
+                print(f"[WARNING] New merkle: {merkle_branch_le}")
 
             self.jobs[job_id] = job
             self.current_job = job
@@ -782,9 +807,9 @@ class StratumServer:
                 boxen(
                     f"JOB DETAILS:",
                     f"Job ID:".ljust(30) +                      job_id,
-                    f"Job prevhash:".ljust(30) +                job.get('prevhash', 'MISSING'),
-                    f"Job nbits:".ljust(30) +                   job.get('nbits', 'MISSING'),
-                    f"Job ntime:".ljust(30) +                   job.get('ntime', 'MISSING'),
+                    f"Job prevhash:".ljust(30) +                template["previousblockhash"],
+                    f"Job nbits:".ljust(30) +                   f"{int(template["bits"], 16):08x}",
+                    f"Job ntime:".ljust(30) +                   f"{template['curtime']:08x}",
                     f"Job merkle branch count:".ljust(30) +     str(len(job.get('merkle_branch', 'MISSING'))),
                     f"",
                     f"DIFFICULTY:",
@@ -809,7 +834,7 @@ class StratumServer:
                 print(f"[DEBUG] [JOB] Total jobs in memory: {len(self.jobs)}")
                 print(f"[DEBUG] [JOB] Job keys: {list(self.jobs.keys())}")
                 print(f"[DEBUG] [JOB] Height: {job['height']}")
-                print(f"[DEBUG] [JOB] Transactions: {len(all_txids)} + 1 coinbase")
+                print(f"[DEBUG] [JOB] Transactions: {len(all_txids_le)} + 1 coinbase")
 
             return job
         except Exception as e:
@@ -818,7 +843,7 @@ class StratumServer:
 
 
 
-    async def process_share(self, worker_name: str, job_id: str, extranonce1: str, extra_nonce2: str, ntime: str, nonce: str) -> bool:
+    async def process_share(self, worker_name: str, job_id: str, extra_nonce1: str, extra_nonce2: str, ntime: str, nonce: str) -> bool:
         """Process submitted share from a miner with proper job matching"""
         self.shares_submitted += 1
 
@@ -854,7 +879,7 @@ class StratumServer:
 
             # Step 1: Validate share using the EXACT job the miner worked on
             result_hash, header_bytes, coinbase_hex = ShareValidator.validate_share(
-                job, extranonce1, extra_nonce2, ntime, nonce
+                job, extra_nonce1, extra_nonce2, ntime, nonce
             )
             
 
@@ -887,6 +912,7 @@ class StratumServer:
                 self.shares_rejected += 1
                 to_print.append(f"Share Status: ❌ REJECTED - Hash too high")
 
+            prevhash_display = StratumUtils.reverse_hex_4b_chunks(StratumUtils.reverse_hex(job['prevhash']))
             to_print.append("")
             to_print.append(f"Job ID:".ljust(25) +                  f"{job_id}")
             to_print.append(f"Mined for Height:".ljust(25) +        f"{job['height']}")
@@ -898,7 +924,7 @@ class StratumServer:
             to_print.append(f"Pool Difficulty:".ljust(25) +         f"{self.pool_difficulty:,}")
             to_print.append(f"Network Difficulty:".ljust(25) +      f"{self.network_difficulty:,}")
             to_print.append("")
-            to_print.append(f"SHA256 Previous Hash:".ljust(25) +    f"{StratumUtils.reverse_hex(job['prevhash'])}")
+            to_print.append(f"SHA256 Previous Hash:".ljust(25) +    f"{prevhash_display}")
             to_print.append(f"SHA256 Hash:".ljust(25) +             StratumUtils.sha256d(header_bytes)[::-1].hex())
             to_print.append(f"Proposed block Height:".ljust(25) +   f"{job['height']}")
 
@@ -914,7 +940,7 @@ class StratumServer:
 
             # Step 4: Submit block to network if it has low enough hash
             if(is_network_acceptable):
-                if await self._submit_block(job, extranonce1, extra_nonce2, ntime, nonce, coinbase_hex):
+                if await self._submit_block(job, extra_nonce1, extra_nonce2, ntime, nonce, coinbase_hex):
                     self.blocks_found += 1
             
             return is_accepted
@@ -994,10 +1020,7 @@ class StratumServer:
             version_final = StratumUtils.reverse_hex(job["version"]) # Version: LE processing (no change needed)
 
             # PrevHash: BE processing (reverse each 4-byte chunk)
-            prevhash_final = ""
-            for i in range(0, 64, 8):  # Process 4-byte chunks (8 hex chars each)
-                chunk = job["prevhash"][i:i+8]
-                prevhash_final += StratumUtils.reverse_hex(chunk)
+            prevhash_final = StratumUtils.reverse_hex_4b_chunks(job["prevhash"])
 
             merkle_final = merkle_root_binary.hex()
             ntime_final = StratumUtils.reverse_hex(ntime)
