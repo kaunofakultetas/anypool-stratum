@@ -20,6 +20,7 @@ For now, only Litecoin testnet is supported.
 <br/>
 
 ## Quick Start
+Follow steps below to quickly start the stratum server with LTC testnet node and cpu miner:
 
 1. **Clone the repository:**
    ```bash
@@ -40,6 +41,11 @@ For now, only Litecoin testnet is supported.
 4. **Run the server:**
    ```bash
    ./runUpdateThisStack.sh
+   ```
+
+5. **Check the logs:**
+   ```bash
+   sudo docker-compose logs -f
    ```
 
 <br/>
