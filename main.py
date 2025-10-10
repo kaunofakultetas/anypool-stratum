@@ -524,9 +524,35 @@ class StratumServer:
             else:
                 return "ff" + struct.pack('<Q', i).hex()
 
+
+
         def bip34_height_push(height: int) -> bytes:
-            b = height.to_bytes(4, 'little').rstrip(b'\x00') or b'\x00'
-            return bytes([len(b)]) + b
+            """
+            Encode height for BIP34 coinbase using Bitcoin's CScriptNum encoding.
+            This is compatible with all Bitcoin-based coins (BTC, LTC, DOGE, etc.)
+            """
+            # Use CScriptNum encoding from Bitcoin Core
+            if height == 0:
+                return b'\x00'  # Minimal encoding for zero
+            
+            neg = height < 0
+            absvalue = abs(height)
+            
+            b = []
+            while absvalue:
+                b.append(absvalue & 0xff)
+                absvalue >>= 8
+            
+            # Handle sign bit: if high bit is set, add padding byte
+            if b[-1] & 0x80:
+                b.append(0x80 if neg else 0x00)
+            elif neg:
+                b[-1] |= 0x80
+            
+            result = bytes(b)
+            return bytes([len(result)]) + result
+
+
 
         def p2wpkh_script_for_address(addr: str) -> str:
             # Your existing bech32 decoding logic
