@@ -18,19 +18,65 @@ from datetime import datetime
 
 
 
-# Configuration
+####### ENVIRONMENT VARIABLES #######
+# Coin Selection
+COIN = os.getenv("COIN", "LTC")
+COIN_NETWORK = os.getenv("COIN_NETWORK", "testnet")
+
+# Fullnode RPC
 RPC_HOST = os.getenv("RPC_HOST", "127.0.0.1")
 RPC_PORT = int(os.getenv("RPC_PORT", "19332"))
 RPC_USER = os.getenv("RPC_USER", "admin")
 RPC_PASS = os.getenv("RPC_PASS", "admin")
+
+# Coinbase Transaction
 REWARD_ADDR = os.getenv("REWARD_ADDR")
+COINBASE_MESSAGE = os.getenv("COINBASE_MESSAGE", "/AnyPool by VU Kaunas faculty/")
+
+# Pool Settings
 STRATUM_PORT = int(os.getenv("STRATUM_PORT", "3333"))
 POOL_DIFFICULTY = int(os.getenv("POOL_DIFFICULTY", "2048"))
 POLL_DIFF_DROPPER = os.getenv("POLL_DIFF_DROPPER", "false").lower() == "true"
-COINBASE_MESSAGE = os.getenv("COINBASE_MESSAGE", "/AnyPool by VU Kaunas faculty/")
+
+# Other
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+#####################################
+
+
 
 RPC_URL = f"http://{RPC_HOST}:{RPC_PORT}"
+
+
+
+
+
+
+
+COINS_CONFIG = {
+    "KNF": {
+        "mainnet": {
+            "algo": "SCRYPT",
+            "addr_prefix": "knf",
+        },
+        "testnet": {
+            "algo": "SCRYPT",
+            "addr_prefix": "tknf",
+        }
+    },
+    "LTC": {
+        "mainnet": {
+            "algo": "SCRYPT",
+            "addr_prefix": "ltc",
+        },
+        "testnet": {
+            "algo": "SCRYPT",
+            "addr_prefix": "tltc",
+        }
+    }
+}
+
+
+
 
 
 
@@ -47,11 +93,10 @@ class StratumUtils:
 
 
     @staticmethod
-    def ltc_pow_hash(header_bytes: bytes) -> str:
+    def scrypt_pow_hash(header_bytes: bytes) -> str:
         """Calculates the Scrypt hash for a block header."""
         if len(header_bytes) != 80:
             raise ValueError("Header must be 80 bytes for Scrypt hashing.")
-
         return scrypt.hash(header_bytes, header_bytes, 1024, 1, 1, 32)[::-1].hex()
 
 
@@ -281,7 +326,7 @@ class ShareValidator:
 
 
         # Step 5: Calculate the Scrypt hash
-        scrypt_hash_hex = StratumUtils.ltc_pow_hash(header_bytes)
+        scrypt_hash_hex = StratumUtils.scrypt_pow_hash(header_bytes)
 
         if(DEBUG):
             print(
@@ -339,7 +384,7 @@ class StratumServer:
         print("")
         print(
             boxen(
-                "Coin: ".ljust(20) +                "Litecoin (LTC)",
+                "Coin: ".ljust(20) +                f"{COIN} ({COIN_NETWORK})",
                 "RPC: ".ljust(20) +                 RPC_URL,
                 "Port: ".ljust(20) +                str(STRATUM_PORT),
                 "Reward Address: ".ljust(20) +      REWARD_ADDR,
@@ -442,7 +487,9 @@ class StratumServer:
 
 
     async def rpc_call(self, method: str, params: List = None) -> Dict:
-        """Make RPC call to Litecoin node"""
+        """
+        Make RPC call to node
+        """
         if params is None:
             params = []
             
@@ -544,8 +591,12 @@ class StratumServer:
                 return ret
 
             hrp, data = bech32_decode(addr)
-            if hrp not in ("ltc", "tltc") or data is None:
-                raise ValueError("Invalid bech32 address for Litecoin network")
+
+            # Get the expected address prefix from config
+            expected_prefix = COINS_CONFIG[COIN][COIN_NETWORK]["addr_prefix"]
+            if hrp != expected_prefix or data is None:
+                raise ValueError(f"Invalid bech32 address for {COIN} {COIN_NETWORK} (expected prefix: {expected_prefix})")
+
             witver = data[0]
             prog5 = data[1:]
             prog = bytes(convertbits(prog5, 5, 8, False))
@@ -1034,7 +1085,7 @@ class StratumServer:
 
 
             # Step 5: Calculate the Scrypt hash
-            scrypt_hash_hex = StratumUtils.ltc_pow_hash(header_bytes)
+            scrypt_hash_hex = StratumUtils.scrypt_pow_hash(header_bytes)
             
 
             if(DEBUG):
