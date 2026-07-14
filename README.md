@@ -18,7 +18,7 @@ A Stratum protocol to Full Node RPC adapter for mining Bitcoin-family coins (SHA
 
 | Coin | Networks | Algorithm | Addresses | Notes |
 |------|----------|-----------|-----------|-------|
-| `BTC` (Bitcoin) | mainnet, testnet3, testnet4 | SHA256d | bech32 (native segwit) | SegWit, BIP310 version rolling (AsicBoost), ⚠ not yet validated against a live node |
+| `BTC` (Bitcoin) | mainnet, testnet3, testnet4 | SHA256d | bech32 (native segwit) | SegWit, BIP310 version rolling (AsicBoost), validated on testnet3/testnet4 2026-07-14 |
 | `LTC` (Litecoin) | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
 | `KNF` (KnfCoin)  | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
 | `DOGE` (Dogecoin) | mainnet, testnet | Scrypt | base58 (legacy P2PKH) | solo mining (no AuxPoW), validated on testnet 2026-07-14 |

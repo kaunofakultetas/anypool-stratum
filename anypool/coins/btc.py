@@ -22,10 +22,6 @@
 #  numerically much smaller than for scrypt at an equal
 #  share rate.
 #
-#  ⚠ Not yet validated against a live block — mine one
-#  testnet3/testnet4 block and freeze its values into tests/
-#  vectors before trusting it on mainnet.
-#
 #  Used by:
 #    - coins/__init__.py — registered in the coin registry
 # -----------------------------------------------------------
