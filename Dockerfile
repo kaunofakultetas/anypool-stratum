@@ -6,9 +6,9 @@ ENV LINES=50
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    "aiohttp==3.12.15"      \
-    "scrypt==0.9.4"         \
+RUN pip install --no-cache-dir      \
+    "aiohttp==3.12.15"              \
+    "scrypt==0.9.4"                 \
     "pyboxen==1.3.0"
 
 COPY . .
