@@ -1,8 +1,8 @@
 # AnyPool - Stratum Mining Pool Server
 
-A Stratum protocol to Full Node RPC adapter for mining Scrypt coins (Litecoin and Litecoin-family forks).
+A Stratum protocol to Full Node RPC adapter for mining Bitcoin-family coins (SHA256d and Scrypt).
 
-![Coins](https://img.shields.io/badge/Coins-LTC_|_KNF-green.svg)
+![Coins](https://img.shields.io/badge/Coins-BTC_|_LTC_|_DOGE_|_KNF-green.svg)
 
 
 <img height="500" alt="Screenshot 2025-08-28 at 12 17 18" src="https://github.com/user-attachments/assets/11074d46-6a85-4043-a016-092d1daac4be" /> <img height="500" alt="Screenshot 2025-08-28 at 12 19 23" src="https://github.com/user-attachments/assets/6ab2d8f1-f436-400d-a9e4-f6ead9e69dee" />
@@ -18,9 +18,16 @@ A Stratum protocol to Full Node RPC adapter for mining Scrypt coins (Litecoin an
 
 | Coin | Networks | Algorithm | Addresses | Notes |
 |------|----------|-----------|-----------|-------|
+| `BTC` (Bitcoin) | mainnet, testnet3, testnet4 | SHA256d | bech32 (native segwit) | SegWit, BIP310 version rolling (AsicBoost), ⚠ not yet validated against a live node |
 | `LTC` (Litecoin) | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
 | `KNF` (KnfCoin)  | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
-| `DOGE` (Dogecoin) | mainnet, testnet | Scrypt | base58 (legacy P2PKH) | ⚠ solo mining, not yet validated against a live node |
+| `DOGE` (Dogecoin) | mainnet, testnet | Scrypt | base58 (legacy P2PKH) | solo mining (no AuxPoW), validated on testnet 2026-07-14 |
+
+**Difficulty units differ per algorithm.** `POOL_DIFFICULTY` is interpreted
+against the coin's difficulty-1 target: for Scrypt coins one diff-1 share
+is ~65k hashes, for SHA256d it is ~4.3G hashes (Bitcoin's classic bdiff).
+A scrypt ASIC works well around 5&nbsp;000–100&nbsp;000; a SHA256 ASIC on
+testnet is fine with 1&nbsp;000–65&nbsp;000, and a CPU miner wants single digits.
 
 Both modern (segwit/MWEB) and older pre-segwit Bitcoin Core forks are
 supported — the differences (address format, block serialization, template
@@ -65,8 +72,8 @@ Follow steps below to quickly start the stratum server with LTC testnet node and
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `COIN` | Coin to mine (`LTC`, `KNF`) | LTC | ❌ |
-| `COIN_NETWORK` | Network (`mainnet`, `testnet`) | testnet | ❌ |
+| `COIN` | Coin to mine (`BTC`, `LTC`, `DOGE`, `KNF`) | LTC | ❌ |
+| `COIN_NETWORK` | Network (`mainnet`, `testnet`; for BTC: `mainnet`, `testnet3`, `testnet4`) | testnet | ❌ |
 | `RPC_HOST` | Full Node RPC host | 127.0.0.1 | ❌ |
 | `RPC_PORT` | Full Node RPC port | 19332 | ❌ |
 | `RPC_USER` | RPC username | admin | ❌ |
@@ -183,6 +190,25 @@ for KNF block 1777).
 4. **Block submission** — a share that also meets the network target is
    assembled into a complete block (same header, witness coinbase, all
    template transactions, MWEB extension) and submitted via `submitblock`.
+
+<br/>
+
+## Stratum Protocol Support
+
+Beyond the core `subscribe` / `authorize` / `submit` flow, the pool
+answers every optional method miners and proxies commonly send —
+an unanswered request makes many ASICs and rental services
+(e.g. MiningRigRentals) stall or drop the pool:
+
+| Method | Behavior |
+|--------|----------|
+| `mining.configure` (BIP310) | version-rolling granted on BTC (mask `1fffe000`), declined on coins whose version bits carry meaning |
+| `mining.extranonce.subscribe` | acknowledged (extranonce1 never changes mid-connection) |
+| `mining.suggest_difficulty` | acknowledged; the pool keeps its configured difficulty |
+| anything else | answered with a proper "method not supported" error |
+
+`mining.submit` accepts both the 5-parameter form and the 6-parameter
+form with version-rolling bits (bits must stay inside the negotiated mask).
 
 <br/>
 

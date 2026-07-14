@@ -19,7 +19,9 @@ from anypool.mining.shares import (
     NTIME_FORWARD_SLACK,
     build_header,
     ntime_within_range,
+    rolled_version,
     validate_share_params,
+    version_bits_allowed,
 )
 from tests import vectors
 
@@ -155,31 +157,61 @@ class TestValidateShareParams(unittest.TestCase):
 
     # -----------------------------------------------------------
     # Some ASIC firmwares (e.g. NexusL1/BM1491) append a 6th
-    # parameter: the BIP310 version-rolling bits. The pool
-    # declines version-rolling in mining.configure, so the only
-    # legal value is zero — the exact submission a rented L1
-    # sent on Dogecoin testnet, which an earlier version of this
-    # pool rejected purely for its arity.
+    # parameter: the BIP310 version-rolling bits. An earlier
+    # version of this pool rejected such submissions purely for
+    # their arity — the exact submission a rented L1 sent on
+    # Dogecoin testnet is the regression vector here. Whether
+    # the BITS are allowed is a separate per-connection check
+    # (version_bits_allowed below).
     # -----------------------------------------------------------
-    def test_six_param_submission_with_zero_version_bits_accepted(self):
+    def test_six_param_submission_accepted(self):
         params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "00000000"]
+        self.assertTrue(validate_share_params(params))
+        params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "1fffe000"]
         self.assertTrue(validate_share_params(params))
 
 
-    def test_six_param_submission_with_nonzero_version_bits_rejected(self):
-        # Non-zero bits mean the miner rolled the header version,
-        # which we never negotiated — the rebuilt header would not
-        # match what was hashed.
-        params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "1fffe000"]
-        self.assertFalse(validate_share_params(params))
-        # Garbage in the 6th slot must also be rejected
+    def test_six_param_submission_with_garbage_bits_rejected(self):
         self.assertFalse(validate_share_params(["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "xyz"]))
         self.assertFalse(validate_share_params(["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", None]))
+        self.assertFalse(validate_share_params(["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "1f00"]))  # not 4 bytes
 
 
     def test_seven_param_submission_rejected(self):
         params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "00000000", "extra"]
         self.assertFalse(validate_share_params(params))
+
+
+
+
+    # -----------------------------------------------------------
+    # Version-rolling policy: bits must stay inside the mask the
+    # connection negotiated. Mask 0 (never negotiated / coin
+    # forbids rolling) only lets all-zero bits through.
+    # -----------------------------------------------------------
+    def test_version_bits_against_mask(self):
+        self.assertTrue(version_bits_allowed("00000000", 0))
+        self.assertFalse(version_bits_allowed("00002000", 0))
+
+        bip320_mask = 0x1FFFE000
+        self.assertTrue(version_bits_allowed("00000000", bip320_mask))
+        self.assertTrue(version_bits_allowed("1fffe000", bip320_mask))
+        self.assertTrue(version_bits_allowed("00002000", bip320_mask))
+        self.assertFalse(version_bits_allowed("20000000", bip320_mask))  # bit 29: outside
+        self.assertFalse(version_bits_allowed("00000001", bip320_mask))  # bit 0: outside
+
+
+    # -----------------------------------------------------------
+    # Rolling replaces ONLY the masked bits; everything else
+    # keeps the job's version. Zero bits + zero mask = identity.
+    # -----------------------------------------------------------
+    def test_rolled_version(self):
+        self.assertEqual(rolled_version("20000000", "00000000", 0), "20000000")
+        self.assertEqual(rolled_version("20000000", "1fffe000", 0x1FFFE000), "3fffe000")
+        self.assertEqual(rolled_version("3fffe000", "00000000", 0x1FFFE000), "20000000")
+        # Bits outside the mask are silently ignored (the policy
+        # gate is version_bits_allowed, not this function)
+        self.assertEqual(rolled_version("20000000", "ffffffff", 0x1FFFE000), "3fffe000")
 
 
 

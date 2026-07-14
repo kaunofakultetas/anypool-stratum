@@ -26,6 +26,7 @@
 from typing import Dict
 
 from anypool.coins.base import CoinDefinition
+from anypool.coins.btc import BTC
 from anypool.coins.doge import DOGE
 from anypool.coins.knf import KNF
 from anypool.coins.ltc import LTC
@@ -35,6 +36,7 @@ REGISTRY: Dict[str, CoinDefinition] = {
     "KNF": KNF,
     "LTC": LTC,
     "DOGE": DOGE,
+    "BTC": BTC,
 }
 
 

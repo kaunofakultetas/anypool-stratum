@@ -59,6 +59,14 @@ class CoinDefinition:
     # submitted block would be malformed.
     has_mweb: bool = False
 
+    # BIP310 version-rolling mask: which header version bits a
+    # miner may overwrite (AsicBoost). Modern SHA256 ASICs
+    # refuse to mine without it, so BTC sets the standard
+    # BIP320 mask 0x1fffe000. MUST stay 0 for coins whose
+    # version bits carry meaning (e.g. Dogecoin's AuxPoW
+    # chain id) — 0 makes the pool decline the extension.
+    version_rolling_mask: int = 0
+
 
 
 

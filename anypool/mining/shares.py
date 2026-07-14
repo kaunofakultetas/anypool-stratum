@@ -53,10 +53,11 @@ NTIME_BACKWARD_SLACK = 600
 # -----------------------------------------------------------
 #
 # Sanity check of a raw mining.submit parameter list before
-# anything is done with it: 5 entries (some ASIC firmwares
-# append a 6th — the BIP310 version-rolling bits — which must
-# be zero since this pool declines version-rolling), and the
-# three miner-chosen values must be valid 4-byte hex strings.
+# anything is done with it: 5 entries (or 6 when the miner
+# appends BIP310 version-rolling bits), and every miner-chosen
+# value must be a valid 4-byte hex string. Whether the version
+# bits are ALLOWED (inside the negotiated mask) is a separate,
+# per-connection question — see version_bits_allowed().
 #
 # Expected params:
 #   [worker_name, job_id, extra_nonce2, ntime, nonce]
@@ -69,15 +70,14 @@ def validate_share_params(params: List) -> bool:
     if len(params) not in (5, 6):
         return False
 
-    # Optional 6th param: version-rolling bits. We decline the
-    # version-rolling extension in mining.configure, so the only
-    # acceptable value is zero (= header version used unchanged).
+    # Optional 6th param: version-rolling bits, 4-byte hex
     if len(params) == 6:
         version_bits = params[5]
         try:
-            if int(version_bits, 16) != 0:
-                return False
+            int(version_bits, 16)
         except (ValueError, TypeError):
+            return False
+        if len(version_bits) != 8:
             return False
 
     worker_name, job_id, extra_nonce2, ntime, nonce = params[:5]
@@ -138,6 +138,52 @@ def ntime_within_range(job_ntime_hex: str, ntime_hex: str) -> bool:
 
 
 # -----------------------------------------------------------
+# version_bits_allowed
+# -----------------------------------------------------------
+#
+# True when the version bits a miner submitted stay inside
+# the version-rolling mask negotiated on its connection. A
+# miner that never negotiated version-rolling has mask 0, so
+# only all-zero bits pass — its header version must be used
+# unchanged.
+#
+# Used by:
+#   - stratum/connection.py — handle_submit()
+# -----------------------------------------------------------
+def version_bits_allowed(version_bits_hex: str, negotiated_mask: int) -> bool:
+    return (int(version_bits_hex, 16) & ~negotiated_mask) == 0
+
+
+
+
+# -----------------------------------------------------------
+# rolled_version
+# -----------------------------------------------------------
+#
+# Applies BIP310 version rolling: the bits inside the mask
+# are REPLACED by the miner's bits, everything outside the
+# mask keeps the job's original version. With all-zero bits
+# and mask 0 this is the identity, so non-rolling coins and
+# miners go through the same code path.
+#
+# Used by:
+#   - mining/shares.py — build_header()
+# -----------------------------------------------------------
+def rolled_version(job_version_hex: str, version_bits_hex: str, mask: int) -> str:
+    version = int(job_version_hex, 16)
+    bits = int(version_bits_hex, 16)
+    return f"{(version & ~mask) | (bits & mask):08x}"
+
+
+
+
+
+
+
+
+
+
+# -----------------------------------------------------------
 # build_header
 # -----------------------------------------------------------
 #
@@ -165,7 +211,8 @@ def ntime_within_range(job_ntime_hex: str, ntime_hex: str) -> bool:
 #   - stratum/server.py — process_share() and _submit_block()
 # -----------------------------------------------------------
 def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
-                 ntime: str, nonce: str, context: str = "validate_share") -> Tuple[str, str, bytes]:
+                 ntime: str, nonce: str, context: str = "validate_share",
+                 version_bits: str = "00000000") -> Tuple[str, str, bytes]:
 
     # Step 1: Reassemble the coinbase tx and hash it into its txid
     coinbase_txid_hex = job["coinb1"] + extra_nonce1 + extra_nonce2 + job["coinb2"]
@@ -196,8 +243,12 @@ def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
     ])
 
 
-    # Step 3: Convert every field into serialized header byte order
-    version_final = reverse_hex(job["version"])
+    # Step 3: Convert every field into serialized header byte order.
+    # The version first gets the miner's version-rolling bits
+    # applied (identity when bits are zero / coin declines rolling).
+    version_hex = rolled_version(job["version"], version_bits,
+                                 coins.active().version_rolling_mask)
+    version_final = reverse_hex(version_hex)
     prevhash_final = reverse_hex_4b_chunks(job["prevhash"])
     merkle_final = merkle_root_le
     ntime_final = reverse_hex(ntime)

@@ -77,6 +77,32 @@ def scrypt_pow_hash(header_bytes: bytes) -> str:
 
 
 # -----------------------------------------------------------
+# sha256d_pow_hash
+# -----------------------------------------------------------
+#
+# The SHA256d proof-of-work hash used by Bitcoin itself. For
+# SHA256 coins the PoW hash IS the block hash — double SHA256
+# of the 80-byte header, rendered big-endian so it can be
+# compared numerically against a target.
+#
+# Used by:
+#   - coins/btc.py — as its pow_hash function
+# -----------------------------------------------------------
+def sha256d_pow_hash(header_bytes: bytes) -> str:
+    if len(header_bytes) != 80:
+        raise ValueError("Header must be 80 bytes for SHA256d hashing.")
+    return sha256d(header_bytes)[::-1].hex()
+
+
+
+
+
+
+
+
+
+
+# -----------------------------------------------------------
 # reverse_hex
 # -----------------------------------------------------------
 #

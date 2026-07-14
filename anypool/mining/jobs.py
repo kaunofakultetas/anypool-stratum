@@ -278,17 +278,19 @@ class JobManager:
     # -----------------------------------------------------------
     #
     # Duplicate-share guard. Returns True the FIRST time this
-    # exact (extranonce1, extranonce2, ntime, nonce) combination
-    # is submitted for the job, False on every resubmission —
-    # without this, one winning share could be replayed forever
-    # to inflate a miner's accepted-share count.
+    # exact (extranonce1, extranonce2, ntime, nonce, version
+    # bits) combination is submitted for the job, False on every
+    # resubmission — without this, one winning share could be
+    # replayed forever to inflate a miner's accepted-share count.
+    # Version bits are part of the key because a version-rolling
+    # miner legitimately reuses a nonce under different bits.
     #
     # Used by:
     #   - stratum/server.py — process_share()
     # -----------------------------------------------------------
     def register_share(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
-                       ntime: str, nonce: str) -> bool:
-        share_key = (extra_nonce1, extra_nonce2, ntime, nonce)
+                       ntime: str, nonce: str, version_bits: str = "00000000") -> bool:
+        share_key = (extra_nonce1, extra_nonce2, ntime, nonce, version_bits)
 
         if share_key in job["seen_shares"]:
             return False

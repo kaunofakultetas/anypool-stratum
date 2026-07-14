@@ -88,6 +88,22 @@ class TestGbtRequest(unittest.TestCase):
 
 
 
+    # -----------------------------------------------------------
+    # Bitcoin Core REFUSES getblocktemplate without the segwit
+    # rule — it must always be requested.
+    # -----------------------------------------------------------
+    def test_btc_request(self):
+        btc = coins.get_coin("BTC")
+
+        self.assertEqual(btc.gbt_request(), [{"rules": ["segwit"]}])
+        self.assertEqual(
+            btc.gbt_request(longpollid="abc123"),
+            [{"rules": ["segwit"], "longpollid": "abc123"}]
+        )
+
+
+
+
 
 
 
@@ -133,6 +149,60 @@ class TestAddressSchemes(unittest.TestCase):
             coins.get_coin("KNF").address_scheme.payout_script(DOGE_ADDR, "mainnet")
         with self.assertRaises(ValueError):
             coins.get_coin("DOGE").address_scheme.payout_script(vectors.REWARD_ADDR, "mainnet")
+
+
+
+
+    # -----------------------------------------------------------
+    # BTC bech32 scheme, checked against the canonical BIP173
+    # reference vectors (same 20-byte program on both networks).
+    # testnet3 and testnet4 share the "tb" prefix — the same
+    # address must decode identically on both.
+    # -----------------------------------------------------------
+    def test_btc_bech32_scheme(self):
+        btc = coins.get_coin("BTC")
+        expected_script = "0014751e76e8199196d454941c45d1b3a323f1433bd6"
+
+        script = btc.address_scheme.payout_script(
+            "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "mainnet")
+        self.assertEqual(script, expected_script)
+
+        for network in ("testnet3", "testnet4"):
+            script = btc.address_scheme.payout_script(
+                "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", network)
+            self.assertEqual(script, expected_script)
+
+        # Mainnet address on testnet (and vice versa) must fail
+        with self.assertRaises(ValueError):
+            btc.address_scheme.payout_script(
+                "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "testnet3")
+        with self.assertRaises(ValueError):
+            btc.address_scheme.payout_script(
+                "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", "mainnet")
+
+
+
+
+
+
+
+
+
+
+class TestVersionRolling(unittest.TestCase):
+
+
+    # -----------------------------------------------------------
+    # BTC carries the standard BIP320 mask; every other coin
+    # must decline version rolling (mask 0) — Dogecoin's
+    # version bits encode the AuxPoW chain id, and the scrypt
+    # coins were validated without rolling.
+    # -----------------------------------------------------------
+    def test_masks(self):
+        self.assertEqual(coins.get_coin("BTC").version_rolling_mask, 0x1FFFE000)
+        for symbol in ("KNF", "LTC", "DOGE"):
+            self.assertEqual(coins.get_coin(symbol).version_rolling_mask, 0,
+                             f"{symbol} must not allow version rolling")
 
 
 

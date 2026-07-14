@@ -25,9 +25,9 @@ import asyncio
 import json
 import random
 
-from anypool import config
-from anypool.mining.shares import validate_share_params
-from anypool.stratum.errors import ERROR_OTHER, ERROR_UNAUTHORIZED
+from anypool import coins, config
+from anypool.mining.shares import validate_share_params, version_bits_allowed
+from anypool.stratum.errors import ERROR_OTHER, ERROR_UNAUTHORIZED, ERROR_VERSION_ROLLING
 
 
 
@@ -58,6 +58,11 @@ class StratumConnection:
 
         # Unique per connection, prepended to every coinbase
         self.extra_nonce1 = server.next_extranonce1()
+
+        # BIP310 version-rolling mask negotiated via
+        # mining.configure; 0 until (and unless) negotiated —
+        # meaning submitted version bits must be zero
+        self.version_rolling_mask = 0
 
         self.client_ip = writer.get_extra_info('peername')[0]
 
@@ -316,22 +321,42 @@ class StratumConnection:
     # handle_configure
     # -----------------------------------------------------------
     #
-    # BIP310 protocol extension negotiation (version-rolling,
-    # minimum-difficulty, ...). This pool supports none of them,
-    # and the spec-correct way to say so is a result object that
-    # maps every requested extension to false — miners then fall
-    # back to plain stratum instead of stalling on a missing
-    # response.
+    # BIP310 protocol extension negotiation. version-rolling
+    # (AsicBoost) is granted when the active coin allows it:
+    # the negotiated mask is the intersection of the miner's
+    # requested mask and the coin's mask, and submitted shares
+    # may then flip exactly those header version bits. Modern
+    # SHA256 ASICs refuse to mine without this.
     #
-    # Expected params: [[ext_name, ...], {ext params}]
+    # Every other requested extension is declined with false —
+    # the spec-correct way to make miners fall back to plain
+    # stratum instead of stalling on a missing response.
+    #
+    # Expected params: [[ext_name, ...], {"ext.param": value}]
     #
     # Used by:
     #   - stratum/connection.py — process_message()
     # -----------------------------------------------------------
     async def handle_configure(self, msg_id, params):
         requested = params[0] if params and isinstance(params[0], list) else []
+        options = params[1] if len(params) > 1 and isinstance(params[1], dict) else {}
         print(f"[CONFIGURE] {self.client_ip} requested extensions: {requested}")
-        await self.send_response(msg_id, {ext: False for ext in requested})
+
+        result = {ext: False for ext in requested}
+
+        coin_mask = coins.active().version_rolling_mask
+        if "version-rolling" in requested and coin_mask != 0:
+            try:
+                miner_mask = int(options.get("version-rolling.mask", "ffffffff"), 16)
+            except (ValueError, TypeError):
+                miner_mask = 0xFFFFFFFF
+
+            self.version_rolling_mask = coin_mask & miner_mask
+            result["version-rolling"] = True
+            result["version-rolling.mask"] = f"{self.version_rolling_mask:08x}"
+            print(f"[CONFIGURE] {self.client_ip} version-rolling granted, mask {self.version_rolling_mask:08x}")
+
+        await self.send_response(msg_id, result)
 
 
 
@@ -395,13 +420,21 @@ class StratumConnection:
             await self.send_response(msg_id, False, ERROR_OTHER)
             return
 
-        # Slice: some firmwares append a 6th version-rolling param
-        # (validated to be zero above)
         worker_name, job_id, extra_nonce2, ntime, nonce = params[:5]
+
+        # Optional 6th param: BIP310 version-rolling bits. They must
+        # stay inside the mask negotiated via mining.configure
+        # (mask 0 when never negotiated -> only zero bits pass).
+        version_bits = params[5] if len(params) == 6 else "00000000"
+        if not version_bits_allowed(version_bits, self.version_rolling_mask):
+            print(f"[SUBMIT] {self.client_ip} version bits {version_bits} outside negotiated mask {self.version_rolling_mask:08x}")
+            await self.send_response(msg_id, False, ERROR_VERSION_ROLLING)
+            return
 
         try:
             accepted, error = await self.server.process_share(
-                worker_name, job_id, self.extra_nonce1, extra_nonce2, ntime, nonce
+                worker_name, job_id, self.extra_nonce1, extra_nonce2, ntime, nonce,
+                version_bits
             )
             await self.send_response(msg_id, accepted, error)
         except Exception as e:

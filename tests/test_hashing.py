@@ -12,7 +12,13 @@
 
 import unittest
 
-from anypool.crypto.hashing import reverse_hex, reverse_hex_4b_chunks, scrypt_pow_hash, sha256d
+from anypool.crypto.hashing import (
+    reverse_hex,
+    reverse_hex_4b_chunks,
+    scrypt_pow_hash,
+    sha256d,
+    sha256d_pow_hash,
+)
 from tests import vectors
 
 
@@ -79,6 +85,60 @@ class TestScryptPowHash(unittest.TestCase):
             scrypt_pow_hash(b"\x00" * 79)
         with self.assertRaises(ValueError):
             scrypt_pow_hash(b"\x00" * 81)
+
+
+
+
+
+
+
+
+
+
+class TestSha256dPowHash(unittest.TestCase):
+
+    # The Bitcoin genesis block header — the most audited 80
+    # bytes in existence.
+    GENESIS_HEADER = (
+        "01000000"                                                          # version
+        "0000000000000000000000000000000000000000000000000000000000000000"  # prevhash
+        "3ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a"  # merkle root
+        "29ab5f49"                                                          # ntime
+        "ffff001d"                                                          # nbits
+        "1dac2b7c"                                                          # nonce
+    )
+    GENESIS_HASH = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
+
+
+    # -----------------------------------------------------------
+    # For SHA256 coins the PoW hash IS the block hash: hashing
+    # the genesis header must give the genesis block hash.
+    # -----------------------------------------------------------
+    def test_bitcoin_genesis(self):
+        header_bytes = bytes.fromhex(self.GENESIS_HEADER)
+        self.assertEqual(sha256d_pow_hash(header_bytes), self.GENESIS_HASH)
+
+
+    # -----------------------------------------------------------
+    # The genesis hash must satisfy the difficulty-1 target —
+    # exactly the comparison process_share() performs.
+    # -----------------------------------------------------------
+    def test_genesis_meets_difficulty_1(self):
+        from anypool import coins
+        btc = coins.get_coin("BTC")
+        header_bytes = bytes.fromhex(self.GENESIS_HEADER)
+        hash_int = int(sha256d_pow_hash(header_bytes), 16)
+        self.assertLessEqual(hash_int, btc.difficulty_1_target)
+
+
+    # -----------------------------------------------------------
+    # Anything that is not exactly 80 bytes must be refused.
+    # -----------------------------------------------------------
+    def test_rejects_wrong_length(self):
+        with self.assertRaises(ValueError):
+            sha256d_pow_hash(b"\x00" * 79)
+        with self.assertRaises(ValueError):
+            sha256d_pow_hash(b"\x00" * 81)
 
 
 

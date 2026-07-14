@@ -343,7 +343,8 @@ class StratumServer:
     #   - stratum/connection.py — handle_submit()
     # -----------------------------------------------------------
     async def process_share(self, worker_name: str, job_id: str, extra_nonce1: str,
-                            extra_nonce2: str, ntime: str, nonce: str):
+                            extra_nonce2: str, ntime: str, nonce: str,
+                            version_bits: str = "00000000"):
         self.shares_submitted += 1
 
         try:
@@ -362,7 +363,7 @@ class StratumServer:
                 self.shares_rejected += 1
                 return False, ERROR_TIME_OUT_OF_RANGE
 
-            if not self.job_manager.register_share(job, extra_nonce1, extra_nonce2, ntime, nonce):
+            if not self.job_manager.register_share(job, extra_nonce1, extra_nonce2, ntime, nonce, version_bits):
                 print(f"[SHARE] Duplicate share for job {job_id} (nonce {nonce}); rejecting")
                 self.shares_rejected += 1
                 return False, ERROR_DUPLICATE_SHARE
@@ -377,12 +378,14 @@ class StratumServer:
                 "Miner extra nonce2: ".ljust(25) + extra_nonce2,
                 "Miner ntime: ".ljust(25) +        ntime,
                 "Miner nonce: ".ljust(25) +        nonce,
+                "Miner version bits: ".ljust(25) + version_bits,
             ], color="red")
 
 
             # Step 3: Rebuild the header the miner hashed
             result_hash, header_hex, header_bytes = build_header(
-                job, extra_nonce1, extra_nonce2, ntime, nonce, context="process_share"
+                job, extra_nonce1, extra_nonce2, ntime, nonce, context="process_share",
+                version_bits=version_bits
             )
 
 
