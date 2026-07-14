@@ -12,11 +12,11 @@
 #
 #  NOTE: solo mining only. Dogecoin is usually merge-mined
 #  with Litecoin (AuxPoW); this pool mines standalone blocks,
-#  which the network also accepts.
+#  which the network also accepts. Version rolling must stay
+#  disabled: the header version bits encode the AuxPoW chain
+#  id, so they are not free for miners to flip.
 #
-#  ⚠ Not yet validated against a live Dogecoin node — mine
-#  one testnet block and freeze its values into tests/
-#  vectors before trusting it on mainnet.
+#  Validated against a live node (testnet, dogecoind 1.14.7).
 #
 #  Used by:
 #    - coins/__init__.py — registered in the coin registry
