@@ -3,15 +3,22 @@
 #
 #  The only place in the codebase that talks HTTP. A thin
 #  JSON-RPC 1.0 client for the coin daemon (litecoind/knfd),
-#  used for exactly two calls:
+#  used for exactly three calls:
 #
-#    getblocktemplate — poll for new work (every 5s)
-#    submitblock      — hand a solved block to the network
+#    getblocktemplate            — poll for new work (every 5s)
+#    getblocktemplate (longpoll) — blocks until the chain tip
+#                                  moves, for instant job cuts
+#    submitblock                 — hand a solved block to the
+#                                  network
 #
 #  One aiohttp session is created lazily on the first call
 #  and reused for the lifetime of the process — the previous
 #  implementation opened a new session per call, which is
 #  wasteful when polling every few seconds.
+#
+#  Every call carries a timeout (default 10s) so a hung node
+#  can never silently freeze the job refresh loop. Longpoll
+#  calls override it, since blocking is their whole point.
 #
 #  Used by:
 #    - stratum/server.py — StratumServer owns one NodeRPC instance
@@ -22,6 +29,11 @@ from typing import Any, List, Optional
 import aiohttp
 
 from anypool import config
+
+
+# Default per-call timeout in seconds. Normal node calls answer
+# in milliseconds; hitting this means the node is down or hung.
+DEFAULT_TIMEOUT = 10.0
 
 
 
@@ -54,13 +66,18 @@ class NodeRPC:
     # -----------------------------------------------------------
     #
     # Performs one JSON-RPC call and returns its "result" field.
-    # Raises on any error the node reports, so callers can treat
-    # a return value as a successful response.
+    # Raises on any error the node reports (and on timeout), so
+    # callers can treat a return value as a successful response.
+    #
+    # `timeout` overrides the 10s default — longpoll callers
+    # pass a large value because their request is MEANT to hang
+    # until the chain tip moves.
     #
     # Used by:
     #   - stratum/server.py — create_job() and _submit_block()
+    #   - main.py           — longpoll_loop()
     # -----------------------------------------------------------
-    async def call(self, method: str, params: List = None) -> Any:
+    async def call(self, method: str, params: List = None, timeout: float = DEFAULT_TIMEOUT) -> Any:
         if params is None:
             params = []
 
@@ -74,7 +91,8 @@ class NodeRPC:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(auth=self.auth)
 
-        async with self.session.post(self.url, json=payload) as resp:
+        request_timeout = aiohttp.ClientTimeout(total=timeout)
+        async with self.session.post(self.url, json=payload, timeout=request_timeout) as resp:
             data = await resp.json()
             if "error" in data and data["error"]:
                 raise Exception(f"RPC Error: {data['error']}")

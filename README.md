@@ -1,8 +1,8 @@
 # AnyPool - Stratum Mining Pool Server
 
-A Stratum protocol to Full Node RPC adapter for mining.
+A Stratum protocol to Full Node RPC adapter for mining Scrypt coins (Litecoin and Litecoin-family forks).
 
-![Coin](https://img.shields.io/badge/Coin-Litecoin_Testnet-green.svg)
+![Coins](https://img.shields.io/badge/Coins-LTC_|_KNF-green.svg)
 
 
 <img height="500" alt="Screenshot 2025-08-28 at 12 17 18" src="https://github.com/user-attachments/assets/11074d46-6a85-4043-a016-092d1daac4be" /> <img height="500" alt="Screenshot 2025-08-28 at 12 19 23" src="https://github.com/user-attachments/assets/6ab2d8f1-f436-400d-a9e4-f6ead9e69dee" />
@@ -15,7 +15,13 @@ A Stratum protocol to Full Node RPC adapter for mining.
 <br/>
 
 ## Supported coins
-For now, only Litecoin testnet is supported.
+
+| Coin | Networks | Algorithm |
+|------|----------|-----------|
+| `LTC` (Litecoin) | mainnet, testnet | Scrypt |
+| `KNF` (KnfCoin)  | mainnet, testnet | Scrypt |
+
+Adding a new coin is one small file — see [Adding a new coin](#adding-a-new-coin) below.
 
 <br/>
 
@@ -54,25 +60,106 @@ Follow steps below to quickly start the stratum server with LTC testnet node and
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
+| `COIN` | Coin to mine (`LTC`, `KNF`) | LTC | ❌ |
+| `COIN_NETWORK` | Network (`mainnet`, `testnet`) | testnet | ❌ |
 | `RPC_HOST` | Full Node RPC host | 127.0.0.1 | ❌ |
 | `RPC_PORT` | Full Node RPC port | 19332 | ❌ |
 | `RPC_USER` | RPC username | admin | ❌ |
 | `RPC_PASS` | RPC password | admin | ❌ |
-| `REWARD_ADDR` | Your cryptocurrency address for mining rewards |  | ✅ |
+| `REWARD_ADDR` | Your cryptocurrency address for mining rewards (native segwit / bech32) |  | ✅ |
 | `COINBASE_MESSAGE` | Custom message embedded in mined blocks | "/AnyPool by VU Kaunas faculty/" | ❌ |
 | `STRATUM_PORT` | Port for the stratum server | 3333 | ❌ |
 | `POOL_DIFFICULTY` | Mining difficulty | 2048 | ❌ |
 | `POLL_DIFF_DROPPER`| Drop difficulty for miners if network difficulty suddenly drops even lower then pool's fixed difficulty | false | ❌ |
+| `DEBUG` | Print verbose debug panels for every job and share | false | ❌ |
 
 <br/>
 
-## Mining
+## Project Structure
 
-By default, docker-compose.yml file contains a cpuminer container that can be used to mine.
+```
+anypool-stratum/
+├── main.py              # Entry point: config validation + the three loops
+│                        #   (TCP listener, 5s template poll, longpoll)
+├── anypool/
+│   ├── config.py        # Environment variables + startup validation
+│   ├── display.py       # All console output panels
+│   ├── coins/           # Per-coin definitions (PoW, prefixes, GBT rules)
+│   ├── crypto/          # Pure primitives: hashing, merkle tree, bech32
+│   ├── mining/          # Coinbase builder, jobs, share validation, blocks
+│   ├── node/            # JSON-RPC client to the full node
+│   └── stratum/         # Miner-facing network layer (server, connections)
+├── tests/               # Unit tests with known-good mainnet block vectors
+├── requirements.txt
+└── Dockerfile
+```
 
-If you want to mine with your external miner, comment this section out.
+Dependency direction (top depends on bottom):
 
+```
+main.py -> stratum/ -> mining/ -> crypto/
+            (node/)    (coins/)   (config.py, display.py)
+```
 
+<br/>
+
+## Running the Tests
+
+The test suite verifies the full mining pipeline against a real
+network-accepted block (KNF mainnet block 1777): coinbase construction,
+merkle tree math, header assembly and the Scrypt proof-of-work hash are
+all checked byte for byte.
+
+Run inside the container (it has all dependencies installed):
+
+```bash
+sudo docker exec <stratum-container-name> python -m unittest discover -s tests -v
+```
+
+<br/>
+
+## Adding a New Coin
+
+1. Create `anypool/coins/<symbol>.py` with one `CoinDefinition`
+   (see `anypool/coins/base.py` for the fields and `knf.py` for an example):
+
+```python
+from anypool.coins.base import CoinDefinition
+from anypool.crypto.hashing import scrypt_pow_hash
+
+DOGE = CoinDefinition(
+    name="DOGE",
+    algo="SCRYPT",
+    pow_hash=scrypt_pow_hash,
+    difficulty_1_target=0x0000FFFF00000000000000000000000000000000000000000000000000000000,
+    gbt_rules=["segwit"],
+    addr_prefixes={"mainnet": "doge", "testnet": "tdge"},
+)
+```
+
+2. Register it in `anypool/coins/__init__.py` (`REGISTRY` dict).
+3. Set `COIN=<SYMBOL>` in the environment. No other code changes needed.
+
+For a coin with a different PoW algorithm, add the hash function to
+`anypool/crypto/hashing.py` and point the definition's `pow_hash` at it.
+
+<br/>
+
+## How It Works
+
+1. **Job creation** — the pool polls `getblocktemplate` every 5 seconds and
+   also keeps a **longpoll** request hanging at the node, so a new chain tip
+   cuts a fresh job within milliseconds. Identical templates never trigger
+   a job restart.
+2. **Work distribution** — every miner connection gets a unique extranonce1,
+   making every miner's coinbase (and merkle root) distinct.
+3. **Share validation** — each submitted share is rebuilt into the exact
+   80-byte header the miner hashed and checked against the pool target.
+   Stale jobs, duplicate shares and out-of-range timestamps are rejected
+   with standard stratum error codes the miner can display.
+4. **Block submission** — a share that also meets the network target is
+   assembled into a complete block (same header, witness coinbase, all
+   template transactions, MWEB extension) and submitted via `submitblock`.
 
 <br/>
 
@@ -84,7 +171,7 @@ The stratum server automatically detects and supports:
 ### SegWit (Segregated Witness)
 - **Witness Commitments**: Automatically includes witness commitments in coinbase transactions when present
 - **SegWit Transactions**: Properly handles SegWit transaction data from block templates
-- **Address Support**: Compatible with both legacy and SegWit address formats
+- **Address Support**: Native segwit (bech32) reward addresses
 
 ### MWEB (MimbleWimble Extension Blocks)
 - **MWEB Detection**: Automatically detects MWEB data in block templates
@@ -95,16 +182,17 @@ The stratum server automatically detects and supports:
 
 ## Security Notes
 
-- This implementation includes simplified address decoding
-- For production use, implement proper base58check decoding
-- Consider adding authentication and rate limiting
+- Worker authorization accepts any name/password — fine for a private or
+  teaching pool, do NOT expose to untrusted miners as-is
+- Duplicate shares, stale jobs and rolled timestamps are rejected
 - Always test on testnet first
 
 <br/>
 
 ## Troubleshooting
 
-1. **RPC Connection Errors**: Check your Litecoin node is running and RPC credentials are correct
-2. **Invalid Address**: Make sure REWARD_ADDR is a valid Litecoin testnet address
+1. **RPC Connection Errors**: Check your node is running and RPC credentials are correct
+2. **Invalid Address**: Make sure REWARD_ADDR is a valid bech32 address for the selected COIN + COIN_NETWORK (the pool refuses to start otherwise)
 3. **Port Conflicts**: Change STRATUM_PORT if 3333 is in use
 4. **Low Hash Rate**: Adjust POOL_DIFFICULTY for your mining hardware
+5. **Share rejections**: The miner's own log now shows the reason (stale job, duplicate, low difficulty, ntime out of range)

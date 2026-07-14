@@ -14,7 +14,13 @@
 
 import unittest
 
-from anypool.mining.shares import build_header, validate_share_params
+from anypool.mining.shares import (
+    NTIME_BACKWARD_SLACK,
+    NTIME_FORWARD_SLACK,
+    build_header,
+    ntime_within_range,
+    validate_share_params,
+)
 from tests import vectors
 
 
@@ -143,6 +149,59 @@ class TestValidateShareParams(unittest.TestCase):
         self.assertFalse(validate_share_params(["w", "job", "090000", "6a5639fc", "3a337292"]))    # too short
         self.assertFalse(validate_share_params(["w", "job", "09000000", "6a5639fc", "3a3372921"])) # too long
         self.assertFalse(validate_share_params(["w", "job", "09000000", "6a5639fc", None]))        # wrong type
+
+
+
+
+
+
+
+
+
+
+class TestNtimeWithinRange(unittest.TestCase):
+
+
+    # -----------------------------------------------------------
+    # The real share submitted ntime identical to the job ntime,
+    # and small legitimate rolls must also pass.
+    # -----------------------------------------------------------
+    def test_legitimate_ntime_accepted(self):
+        self.assertTrue(ntime_within_range(vectors.JOB_NTIME, vectors.SHARE_NTIME))
+
+        job_ntime = int(vectors.JOB_NTIME, 16)
+        self.assertTrue(ntime_within_range(vectors.JOB_NTIME, f"{job_ntime + 60:08x}"))
+        self.assertTrue(ntime_within_range(vectors.JOB_NTIME, f"{job_ntime - 60:08x}"))
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # Exactly at the window edges is still allowed; one second
+    # beyond either edge is rejected.
+    # -----------------------------------------------------------
+    def test_window_edges(self):
+        job_ntime = int(vectors.JOB_NTIME, 16)
+
+        self.assertTrue(ntime_within_range(vectors.JOB_NTIME, f"{job_ntime + NTIME_FORWARD_SLACK:08x}"))
+        self.assertTrue(ntime_within_range(vectors.JOB_NTIME, f"{job_ntime - NTIME_BACKWARD_SLACK:08x}"))
+
+        self.assertFalse(ntime_within_range(vectors.JOB_NTIME, f"{job_ntime + NTIME_FORWARD_SLACK + 1:08x}"))
+        self.assertFalse(ntime_within_range(vectors.JOB_NTIME, f"{job_ntime - NTIME_BACKWARD_SLACK - 1:08x}"))
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # Absurd timestamps (zero, far future) must be rejected.
+    # -----------------------------------------------------------
+    def test_absurd_ntime_rejected(self):
+        self.assertFalse(ntime_within_range(vectors.JOB_NTIME, "00000000"))
+        self.assertFalse(ntime_within_range(vectors.JOB_NTIME, "ffffffff"))
 
 
 

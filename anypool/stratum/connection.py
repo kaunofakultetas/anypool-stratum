@@ -26,6 +26,7 @@ import json
 import random
 
 from anypool.mining.shares import validate_share_params
+from anypool.stratum.errors import ERROR_OTHER, ERROR_UNAUTHORIZED
 
 
 
@@ -320,7 +321,9 @@ class StratumConnection:
     # are auto-authorized from the worker name in the submit —
     # some miner software submits before authorizing. After
     # parameter validation the share is judged by the server
-    # and the verdict (true/false) is sent back.
+    # and the verdict is sent back; rejections carry a standard
+    # stratum error tuple so the miner's own log shows WHY
+    # (stale job, duplicate, low difficulty, ...).
     #
     # Expected params:
     #   [worker_name, job_id, extra_nonce2, ntime, nonce]
@@ -336,23 +339,23 @@ class StratumConnection:
             self.authorized = True
 
         if not self.authorized:
-            await self.send_response(msg_id, False)
+            await self.send_response(msg_id, False, ERROR_UNAUTHORIZED)
             return
 
         if not validate_share_params(params):
-            await self.send_response(msg_id, False)
+            await self.send_response(msg_id, False, ERROR_OTHER)
             return
 
         worker_name, job_id, extra_nonce2, ntime, nonce = params
 
         try:
-            accepted = await self.server.process_share(
+            accepted, error = await self.server.process_share(
                 worker_name, job_id, self.extra_nonce1, extra_nonce2, ntime, nonce
             )
-            await self.send_response(msg_id, accepted)
+            await self.send_response(msg_id, accepted, error)
         except Exception as e:
             print(f"[SUBMIT] {self.client_ip} share processing error: {e}")
-            await self.send_response(msg_id, False)
+            await self.send_response(msg_id, False, ERROR_OTHER)
 
 
 

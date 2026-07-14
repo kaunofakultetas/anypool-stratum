@@ -34,8 +34,15 @@ from anypool import coins, config, display
 from anypool.crypto.hashing import reverse_hex, reverse_hex_4b_chunks, sha256d
 from anypool.mining.blocks import assemble_block
 from anypool.mining.jobs import JobManager, build_job
-from anypool.mining.shares import build_header
+from anypool.mining.shares import build_header, ntime_within_range
 from anypool.node.rpc import NodeRPC
+from anypool.stratum.errors import (
+    ERROR_DUPLICATE_SHARE,
+    ERROR_JOB_NOT_FOUND,
+    ERROR_LOW_DIFFICULTY,
+    ERROR_OTHER,
+    ERROR_TIME_OUT_OF_RANGE,
+)
 
 
 
@@ -320,21 +327,23 @@ class StratumServer:
     #
     #   1. Look up the EXACT job the miner worked on (stale
     #      job id -> reject).
-    #   2. Rebuild the header the miner hashed and its Scrypt
+    #   2. Cheap sanity gates: ntime inside the allowed window,
+    #      not a duplicate of an earlier submission.
+    #   3. Rebuild the header the miner hashed and its PoW
     #      hash (shares.build_header).
-    #   3. hash <= pool target?     -> share accepted.
+    #   4. hash <= pool target?     -> share accepted.
     #      hash <= network target?  -> it is a full block,
     #      submit it to the node.
     #
-    # Returns True when the share met the pool target — that
-    # boolean travels back to the miner as the mining.submit
-    # response.
+    # Returns (accepted, error): accepted travels back to the
+    # miner as the mining.submit result, error is a standard
+    # stratum error tuple (or None) shown in the miner's log.
     #
     # Used by:
     #   - stratum/connection.py — handle_submit()
     # -----------------------------------------------------------
     async def process_share(self, worker_name: str, job_id: str, extra_nonce1: str,
-                            extra_nonce2: str, ntime: str, nonce: str) -> bool:
+                            extra_nonce2: str, ntime: str, nonce: str):
         self.shares_submitted += 1
 
         try:
@@ -344,7 +353,19 @@ class StratumServer:
             if not job:
                 print("[SHARE] Stale/unknown job_id; rejecting")
                 self.shares_rejected += 1
-                return False
+                return False, ERROR_JOB_NOT_FOUND
+
+
+            # Step 2: Cheap sanity gates before any hashing work
+            if not ntime_within_range(job["ntime"], ntime):
+                print(f"[SHARE] ntime {ntime} outside allowed window of job ntime {job['ntime']}; rejecting")
+                self.shares_rejected += 1
+                return False, ERROR_TIME_OUT_OF_RANGE
+
+            if not self.job_manager.register_share(job, extra_nonce1, extra_nonce2, ntime, nonce):
+                print(f"[SHARE] Duplicate share for job {job_id} (nonce {nonce}); rejecting")
+                self.shares_rejected += 1
+                return False, ERROR_DUPLICATE_SHARE
 
             display.debug_box("DEBUG - Job and share details comparison", [
                 "Job ID: ".ljust(25) +             job_id,
@@ -359,13 +380,13 @@ class StratumServer:
             ], color="red")
 
 
-            # Step 2: Rebuild the header the miner hashed
+            # Step 3: Rebuild the header the miner hashed
             result_hash, header_hex, header_bytes = build_header(
                 job, extra_nonce1, extra_nonce2, ntime, nonce, context="process_share"
             )
 
 
-            # Step 3: Compare against pool and network targets
+            # Step 4: Compare against pool and network targets
             hash_int = int(result_hash, 16)
             is_accepted = hash_int <= self.pool_target
             is_block = is_accepted and hash_int <= self.network_target
@@ -390,19 +411,19 @@ class StratumServer:
             )
 
 
-            # Step 4: A network-grade share is a block — submit it
+            # Step 5: A network-grade share is a block — submit it
             if is_block:
                 if await self._submit_block(job, extra_nonce1, extra_nonce2, header_hex):
                     self.blocks_found += 1
 
-            return is_accepted
+            return is_accepted, (None if is_accepted else ERROR_LOW_DIFFICULTY)
 
         except Exception as e:
             self.shares_rejected += 1
             print(f"[ERROR] Share processing failed: {e}")
             import traceback
             traceback.print_exc()
-            return False
+            return False, ERROR_OTHER
 
         finally:
             if self.shares_submitted > 0:

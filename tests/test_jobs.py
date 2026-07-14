@@ -121,6 +121,35 @@ class TestJobManager(unittest.TestCase):
 
 
     # -----------------------------------------------------------
+    # Duplicate-share guard: the first submission of a nonce
+    # combination registers, every replay is refused. A fresh
+    # job starts with a clean slate.
+    # -----------------------------------------------------------
+    def test_register_share_rejects_duplicates(self):
+        manager = JobManager()
+        job = build_job(vectors.TEMPLATE, manager.next_job_id())
+        manager.store(job)
+
+        share = (vectors.EXTRANONCE1, vectors.EXTRANONCE2, vectors.SHARE_NTIME, vectors.SHARE_NONCE)
+
+        self.assertTrue(manager.register_share(job, *share))    # first time: accepted
+        self.assertFalse(manager.register_share(job, *share))   # replay: refused
+        self.assertFalse(manager.register_share(job, *share))   # still refused
+
+        # A different nonce is a different share
+        self.assertTrue(manager.register_share(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2, vectors.SHARE_NTIME, "00000000"))
+
+        # A new job does not remember old shares
+        new_job = build_job(vectors.TEMPLATE, manager.next_job_id())
+        manager.store(new_job)
+        self.assertTrue(manager.register_share(new_job, *share))
+
+
+
+
+
+
+    # -----------------------------------------------------------
     # The store must never grow beyond MAX_STORED_JOBS, and it
     # is the OLDEST jobs that get pruned.
     # -----------------------------------------------------------

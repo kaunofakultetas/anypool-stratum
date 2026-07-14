@@ -39,6 +39,13 @@ from anypool.crypto.hashing import reverse_hex, reverse_hex_4b_chunks, sha256d
 from anypool.crypto.merkle import calculate_merkle_root_from_branch
 
 
+# How far a miner may roll ntime away from the job's ntime.
+# Forward matches the network's own future-block tolerance
+# (2 hours); a little backward slack covers clock skew.
+NTIME_FORWARD_SLACK = 7200
+NTIME_BACKWARD_SLACK = 600
+
+
 
 
 # -----------------------------------------------------------
@@ -79,6 +86,33 @@ def validate_share_params(params: List) -> bool:
 
     except (ValueError, TypeError):
         return False
+
+
+
+
+
+
+
+
+
+
+# -----------------------------------------------------------
+# ntime_within_range
+# -----------------------------------------------------------
+#
+# True when the miner's ntime stays inside the allowed window
+# around the job's ntime. Miners legitimately "roll" ntime a
+# few seconds to extend their nonce space, but an unbounded
+# ntime would let a share claim a timestamp the network would
+# never accept in a real block.
+#
+# Used by:
+#   - stratum/server.py — process_share()
+# -----------------------------------------------------------
+def ntime_within_range(job_ntime_hex: str, ntime_hex: str) -> bool:
+    job_ntime = int(job_ntime_hex, 16)
+    ntime = int(ntime_hex, 16)
+    return (job_ntime - NTIME_BACKWARD_SLACK) <= ntime <= (job_ntime + NTIME_FORWARD_SLACK)
 
 
 

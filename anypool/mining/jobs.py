@@ -141,6 +141,10 @@ def build_job(template: Dict, job_id: str) -> Dict:
         "ntime": ntime_be,
         "height": template["height"],
 
+        # Every share submitted for this job, for duplicate
+        # detection — pruned together with the job itself
+        "seen_shares": set(),
+
         # Kept whole for block submission (tx data, mweb, ...)
         "template": template,
     }
@@ -261,3 +265,31 @@ class JobManager:
     # -----------------------------------------------------------
     def get(self, job_id: str) -> Optional[Dict]:
         return self.jobs.get(job_id)
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # register_share
+    # -----------------------------------------------------------
+    #
+    # Duplicate-share guard. Returns True the FIRST time this
+    # exact (extranonce1, extranonce2, ntime, nonce) combination
+    # is submitted for the job, False on every resubmission —
+    # without this, one winning share could be replayed forever
+    # to inflate a miner's accepted-share count.
+    #
+    # Used by:
+    #   - stratum/server.py — process_share()
+    # -----------------------------------------------------------
+    def register_share(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
+                       ntime: str, nonce: str) -> bool:
+        share_key = (extra_nonce1, extra_nonce2, ntime, nonce)
+
+        if share_key in job["seen_shares"]:
+            return False
+
+        job["seen_shares"].add(share_key)
+        return True
