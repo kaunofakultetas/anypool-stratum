@@ -217,7 +217,7 @@ def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
     # Step 1: Reassemble the coinbase tx and hash it into its txid
     coinbase_txid_hex = job["coinb1"] + extra_nonce1 + extra_nonce2 + job["coinb2"]
     coinbase_txid_le = sha256d(bytes.fromhex(coinbase_txid_hex)).hex()
-    coinbase_txid_be = coinbase_txid_le[::-1]  # For display purposes
+    coinbase_txid_be = reverse_hex(coinbase_txid_le)  # For display purposes
 
     display.debug_box(f"Coinbase Elements as concatenated in {context}()", [
         "Coinb1: ".ljust(15) +        job["coinb1"],

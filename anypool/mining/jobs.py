@@ -26,6 +26,12 @@
 #    template       — the raw getblocktemplate result
 #                     (needed later for block submission)
 #
+#  stratum/server.py additionally snapshots the difficulty
+#  state the job was issued under (pool_difficulty,
+#  pool_target, network_difficulty, network_target), so a
+#  late share is judged against the difficulty the miner was
+#  actually given — not the state of a newer job.
+#
 #  Used by:
 #    - stratum/server.py — create_job(), process_share()
 # -----------------------------------------------------------
@@ -123,7 +129,7 @@ def build_job(template: Dict, job_id: str) -> Dict:
     merkle_branch_le = calculate_merkle_branch(all_txids_le, 0)
 
     display.debug_box("DEBUG - jobs.build_job() merkle", [
-        "Coinbase txid (placeholder): ".ljust(35) + coinbase_txid_le[::-1],
+        "Coinbase txid (placeholder): ".ljust(35) + reverse_hex(coinbase_txid_le),
         "All txids: ".ljust(35) +                   str(all_txids_le),
         "Calculated merkle branch: ".ljust(35) +    str(merkle_branch_le),
     ], color="red")

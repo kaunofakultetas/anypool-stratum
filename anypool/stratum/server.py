@@ -289,8 +289,17 @@ class StratumServer:
             display.new_block_panel(template["height"] - 1, template["previousblockhash"])
 
 
-            # Step 4: Build, store and broadcast the new job
+            # Step 4: Build, store and broadcast the new job.
+            # The difficulty state is snapshotted INTO the job: a late
+            # share must be judged against the difficulty the miner was
+            # actually given for this job, not whatever is current when
+            # the share arrives (testnet's 20-minute rule flips the
+            # difficulty constantly, see POLL_DIFF_DROPPER).
             job = build_job(template, self.job_manager.next_job_id())
+            job["pool_difficulty"] = self.pool_difficulty
+            job["pool_target"] = self.pool_target
+            job["network_difficulty"] = self.network_difficulty
+            job["network_target"] = self.network_target
             self.job_manager.store(job)
 
             if self.connected_clients:
@@ -389,10 +398,13 @@ class StratumServer:
             )
 
 
-            # Step 4: Compare against pool and network targets
+            # Step 4: Compare against the targets THIS JOB was issued
+            # under (snapshotted in create_job) — the current pool/network
+            # state may already describe a newer job at a different
+            # difficulty, which must not affect this share's verdict.
             hash_int = int(result_hash, 16)
-            is_accepted = hash_int <= self.pool_target
-            is_block = is_accepted and hash_int <= self.network_target
+            is_accepted = hash_int <= job["pool_target"]
+            is_block = is_accepted and hash_int <= job["network_target"]
 
             if is_accepted:
                 self.shares_accepted += 1
@@ -407,10 +419,10 @@ class StratumServer:
                 result_hash=result_hash,
                 sha256_hash=sha256d(header_bytes)[::-1].hex(),
                 prevhash_display=reverse_hex_4b_chunks(reverse_hex(job["prevhash"])),
-                pool_difficulty=self.pool_difficulty,
-                network_difficulty=self.network_difficulty,
-                pool_target=self.pool_target,
-                network_target=self.network_target,
+                pool_difficulty=job["pool_difficulty"],
+                network_difficulty=job["network_difficulty"],
+                pool_target=job["pool_target"],
+                network_target=job["network_target"],
             )
 
 
