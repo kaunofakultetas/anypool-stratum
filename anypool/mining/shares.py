@@ -53,20 +53,34 @@ NTIME_BACKWARD_SLACK = 600
 # -----------------------------------------------------------
 #
 # Sanity check of a raw mining.submit parameter list before
-# anything is done with it: exactly 5 entries, and the three
-# miner-chosen values must be valid 4-byte hex strings.
+# anything is done with it: 5 entries (some ASIC firmwares
+# append a 6th — the BIP310 version-rolling bits — which must
+# be zero since this pool declines version-rolling), and the
+# three miner-chosen values must be valid 4-byte hex strings.
 #
 # Expected params:
 #   [worker_name, job_id, extra_nonce2, ntime, nonce]
+#   [worker_name, job_id, extra_nonce2, ntime, nonce, version_bits]
 #
 # Used by:
 #   - stratum/connection.py — handle_submit()
 # -----------------------------------------------------------
 def validate_share_params(params: List) -> bool:
-    if len(params) != 5:
+    if len(params) not in (5, 6):
         return False
 
-    worker_name, job_id, extra_nonce2, ntime, nonce = params
+    # Optional 6th param: version-rolling bits. We decline the
+    # version-rolling extension in mining.configure, so the only
+    # acceptable value is zero (= header version used unchanged).
+    if len(params) == 6:
+        version_bits = params[5]
+        try:
+            if int(version_bits, 16) != 0:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+    worker_name, job_id, extra_nonce2, ntime, nonce = params[:5]
 
     try:
         # Must parse as hex

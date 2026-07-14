@@ -153,6 +153,37 @@ class TestValidateShareParams(unittest.TestCase):
 
 
 
+    # -----------------------------------------------------------
+    # Some ASIC firmwares (e.g. NexusL1/BM1491) append a 6th
+    # parameter: the BIP310 version-rolling bits. The pool
+    # declines version-rolling in mining.configure, so the only
+    # legal value is zero — the exact submission a rented L1
+    # sent on Dogecoin testnet, which an earlier version of this
+    # pool rejected purely for its arity.
+    # -----------------------------------------------------------
+    def test_six_param_submission_with_zero_version_bits_accepted(self):
+        params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "00000000"]
+        self.assertTrue(validate_share_params(params))
+
+
+    def test_six_param_submission_with_nonzero_version_bits_rejected(self):
+        # Non-zero bits mean the miner rolled the header version,
+        # which we never negotiated — the rebuilt header would not
+        # match what was hashed.
+        params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "1fffe000"]
+        self.assertFalse(validate_share_params(params))
+        # Garbage in the 6th slot must also be rejected
+        self.assertFalse(validate_share_params(["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "xyz"]))
+        self.assertFalse(validate_share_params(["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", None]))
+
+
+    def test_seven_param_submission_rejected(self):
+        params = ["x", "00000001", "000aace1", "6a5667d4", "5a5b7e3d", "00000000", "extra"]
+        self.assertFalse(validate_share_params(params))
+
+
+
+
 
 
 

@@ -25,6 +25,7 @@ import asyncio
 import json
 import random
 
+from anypool import config
 from anypool.mining.shares import validate_share_params
 from anypool.stratum.errors import ERROR_OTHER, ERROR_UNAUTHORIZED
 
@@ -96,6 +97,9 @@ class StratumConnection:
                         raw_message = data.decode().strip()
                         if not raw_message:
                             continue
+
+                        if config.DEBUG:
+                            print(f"[WIRE-IN ] {self.client_ip} >> {raw_message[:400]}")
 
                         message = json.loads(raw_message)
                         await self.process_message(message)
@@ -186,6 +190,8 @@ class StratumConnection:
     async def send_message(self, message):
         try:
             data = json.dumps(message) + "\n"
+            if config.DEBUG:
+                print(f"[WIRE-OUT] {self.client_ip} << {data.strip()[:400]}")
             self.writer.write(data.encode())
             await self.writer.drain()
         except Exception as e:
@@ -220,8 +226,26 @@ class StratumConnection:
                 await self.handle_authorize(msg_id, params)
             elif method == "mining.submit":
                 await self.handle_submit(msg_id, params)
+            elif method == "mining.extranonce.subscribe":
+                # Required by proxies like MiningRigRentals: they refuse a
+                # pool that leaves this request unanswered. We never change
+                # extranonce1 mid-connection, so a plain ACK is sufficient.
+                print(f"[EXTRANONCE] {self.client_ip} subscribed to extranonce updates")
+                await self.send_response(msg_id, True)
+            elif method == "mining.suggest_difficulty":
+                # ACK so the miner does not stall waiting for a reply.
+                # The pool keeps its own difficulty; the ASIC just needs
+                # an answer to move on.
+                print(f"[SUGGEST_DIFF] {self.client_ip} suggested difficulty: {params}")
+                await self.send_response(msg_id, True)
+            elif method == "mining.configure":
+                await self.handle_configure(msg_id, params)
             else:
                 print(f"[DEBUG] Unknown method from {self.client_ip}: {method}")
+                # Never leave a request hanging — an unanswered id makes
+                # many miners stall or drop the connection.
+                if msg_id is not None:
+                    await self.send_response(msg_id, None, [-3, f"Method '{method}' not supported", None])
 
         except Exception as e:
             print(f"[PROCESS] {self.client_ip} error processing {method}: {e}")
@@ -289,6 +313,30 @@ class StratumConnection:
 
 
     # -----------------------------------------------------------
+    # handle_configure
+    # -----------------------------------------------------------
+    #
+    # BIP310 protocol extension negotiation (version-rolling,
+    # minimum-difficulty, ...). This pool supports none of them,
+    # and the spec-correct way to say so is a result object that
+    # maps every requested extension to false — miners then fall
+    # back to plain stratum instead of stalling on a missing
+    # response.
+    #
+    # Expected params: [[ext_name, ...], {ext params}]
+    #
+    # Used by:
+    #   - stratum/connection.py — process_message()
+    # -----------------------------------------------------------
+    async def handle_configure(self, msg_id, params):
+        requested = params[0] if params and isinstance(params[0], list) else []
+        print(f"[CONFIGURE] {self.client_ip} requested extensions: {requested}")
+        await self.send_response(msg_id, {ext: False for ext in requested})
+
+
+
+
+    # -----------------------------------------------------------
     # handle_authorize
     # -----------------------------------------------------------
     #
@@ -343,10 +391,13 @@ class StratumConnection:
             return
 
         if not validate_share_params(params):
+            print(f"[SUBMIT] {self.client_ip} rejected malformed submit params: {params}")
             await self.send_response(msg_id, False, ERROR_OTHER)
             return
 
-        worker_name, job_id, extra_nonce2, ntime, nonce = params
+        # Slice: some firmwares append a 6th version-rolling param
+        # (validated to be zero above)
+        worker_name, job_id, extra_nonce2, ntime, nonce = params[:5]
 
         try:
             accepted, error = await self.server.process_share(
