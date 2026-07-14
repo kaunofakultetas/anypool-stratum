@@ -99,9 +99,11 @@ def build_job(template: Dict, job_id: str) -> Dict:
     ntime_be = f"{template['curtime']:08x}"
 
 
-    # Step 2: All template transactions (txids as reported, flipped to LE)
+    # Step 2: All template transactions (txids as reported, flipped
+    # to LE). Daemons older than Bitcoin Core 0.13 have no "txid"
+    # field — for them "hash" is the txid (no segwit, so identical).
     template_txs = template.get("transactions", [])
-    template_txids_be = [t["txid"] for t in template_txs]
+    template_txids_be = [t.get("txid") or t["hash"] for t in template_txs]
     template_txids_le = [bytes.fromhex(txid)[::-1].hex() for txid in template_txids_be]
 
     display.debug_box("DEBUG - jobs.build_job()", [

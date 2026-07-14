@@ -39,14 +39,16 @@ from anypool.mining.coinbase import to_varint
 # implementation used a single byte, which would have
 # produced corrupt blocks with more than 252 transactions).
 #
-# The trailing "01" + mweb data is the MWEB extension block
-# marker used by Litecoin-family templates; it is omitted
-# when the template has no "mweb" field.
+# The MWEB tail (marker byte + optional extension data) is
+# Litecoin-family serialization and is only appended when the
+# coin declares has_mweb — on a plain Bitcoin Core fork like
+# Dogecoin that extra byte would make every block malformed.
 #
 # Used by:
 #   - stratum/server.py — _submit_block()
 # -----------------------------------------------------------
-def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: str) -> str:
+def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: str,
+                   has_mweb: bool) -> str:
 
     # Coinbase in FULL (witness) serialization for the block body
     coinbase_full_hex = job["coinb1_full"] + extra_nonce1 + extra_nonce2 + job["coinb2_full"]
@@ -63,9 +65,12 @@ def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: 
     tx_count = to_varint(len(all_txs) + 1)
 
 
-    # MWEB extension block (Litecoin-family), appended after the txs
-    mweb_hex = job["template"].get("mweb", "")
-    mweb_part = ("01" + mweb_hex) if mweb_hex else "01"
+    # MWEB tail (Litecoin-family only): marker byte, then the
+    # extension data when the template carries any
+    if has_mweb:
+        mweb_part = "01" + job["template"].get("mweb", "")
+    else:
+        mweb_part = ""
 
 
     complete_block = header_hex + tx_count + coinbase_full_hex + all_tx_data_hex + mweb_part

@@ -94,8 +94,12 @@ def validate() -> None:
         raise SystemExit(f"[CONFIG] Unknown COIN_NETWORK '{COIN_NETWORK}' for {COIN}. Supported: {coin.networks()}")
 
     if not REWARD_ADDR:
-        raise SystemExit("[CONFIG] REWARD_ADDR environment variable is required (bech32 address for block rewards)")
+        raise SystemExit("[CONFIG] REWARD_ADDR environment variable is required (address for block rewards)")
 
-    expected_prefix = coin.addr_prefix(COIN_NETWORK)
-    if not REWARD_ADDR.lower().startswith(expected_prefix + "1"):
-        raise SystemExit(f"[CONFIG] REWARD_ADDR '{REWARD_ADDR}' does not look like a {COIN} {COIN_NETWORK} address (expected prefix: {expected_prefix}1...)")
+    # Full decode (checksum and all) through the coin's address
+    # scheme — the exact same code path the coinbase builder uses,
+    # so an address that passes here cannot fail later.
+    try:
+        coin.address_scheme.payout_script(REWARD_ADDR, COIN_NETWORK)
+    except ValueError as e:
+        raise SystemExit(f"[CONFIG] REWARD_ADDR '{REWARD_ADDR}' is not a valid {COIN} {COIN_NETWORK} address: {e}")

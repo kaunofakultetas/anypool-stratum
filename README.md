@@ -16,10 +16,15 @@ A Stratum protocol to Full Node RPC adapter for mining Scrypt coins (Litecoin an
 
 ## Supported coins
 
-| Coin | Networks | Algorithm |
-|------|----------|-----------|
-| `LTC` (Litecoin) | mainnet, testnet | Scrypt |
-| `KNF` (KnfCoin)  | mainnet, testnet | Scrypt |
+| Coin | Networks | Algorithm | Addresses | Notes |
+|------|----------|-----------|-----------|-------|
+| `LTC` (Litecoin) | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
+| `KNF` (KnfCoin)  | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
+| `DOGE` (Dogecoin) | mainnet, testnet | Scrypt | base58 (legacy P2PKH) | ⚠ solo mining, not yet validated against a live node |
+
+Both modern (segwit/MWEB) and older pre-segwit Bitcoin Core forks are
+supported — the differences (address format, block serialization, template
+rules) live entirely in the per-coin definition.
 
 Adding a new coin is one small file — see [Adding a new coin](#adding-a-new-coin) below.
 
@@ -121,19 +126,34 @@ sudo docker exec <stratum-container-name> python -m unittest discover -s tests -
 ## Adding a New Coin
 
 1. Create `anypool/coins/<symbol>.py` with one `CoinDefinition`
-   (see `anypool/coins/base.py` for the fields and `knf.py` for an example):
+   (see `anypool/coins/base.py` for the fields, `knf.py` for a modern
+   segwit coin and `doge.py` for an older pre-segwit fork):
 
 ```python
+from anypool.coins.address import Base58P2PKH, Bech32P2WPKH
 from anypool.coins.base import CoinDefinition
 from anypool.crypto.hashing import scrypt_pow_hash
 
-DOGE = CoinDefinition(
-    name="DOGE",
+# Modern Litecoin-family coin (segwit + MWEB, bech32 addresses):
+NEWCOIN = CoinDefinition(
+    name="NEW",
     algo="SCRYPT",
     pow_hash=scrypt_pow_hash,
-    difficulty_1_target=0x0000FFFF00000000000000000000000000000000000000000000000000000000,
-    gbt_rules=["segwit"],
-    addr_prefixes={"mainnet": "doge", "testnet": "tdge"},
+    difficulty_1_target=0x0000FFFF...,
+    gbt_rules=["segwit", "mweb"],
+    address_scheme=Bech32P2WPKH({"mainnet": "new", "testnet": "tnew"}),
+    has_mweb=True,
+)
+
+# Older Bitcoin Core fork (no segwit, legacy addresses):
+OLDCOIN = CoinDefinition(
+    name="OLD",
+    algo="SCRYPT",
+    pow_hash=scrypt_pow_hash,
+    difficulty_1_target=0x0000FFFF...,
+    gbt_rules=[],                 # old daemons predate the rules param
+    address_scheme=Base58P2PKH({"mainnet": 0x1e, "testnet": 0x71}),
+    has_mweb=False,
 )
 ```
 
@@ -142,6 +162,9 @@ DOGE = CoinDefinition(
 
 For a coin with a different PoW algorithm, add the hash function to
 `anypool/crypto/hashing.py` and point the definition's `pow_hash` at it.
+Before trusting a new coin on mainnet, mine one testnet block and freeze
+its log values into `tests/` as vectors (like `tests/vectors.py` does
+for KNF block 1777).
 
 <br/>
 

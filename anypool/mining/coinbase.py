@@ -28,7 +28,6 @@ import struct
 from typing import Dict
 
 from anypool import coins, config, display
-from anypool.crypto.bech32 import p2wpkh_script_for_address
 
 
 
@@ -159,10 +158,11 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
     scriptsig_len_vi = to_varint(scriptsig_len)
 
 
-    # Output 0: full block reward to the pool's payout address
+    # Output 0: full block reward to the pool's payout address.
+    # The script format (P2WPKH vs legacy P2PKH) is decided by
+    # the active coin's address scheme.
     outputs = []
-    expected_prefix = coins.active().addr_prefix(config.COIN_NETWORK)
-    payout_script = p2wpkh_script_for_address(config.REWARD_ADDR, expected_prefix)
+    payout_script = coins.active().address_scheme.payout_script(config.REWARD_ADDR, config.COIN_NETWORK)
     payout_output = (
         struct.pack('<Q', coinbase_value).hex() +
         to_varint(len(bytes.fromhex(payout_script))) +

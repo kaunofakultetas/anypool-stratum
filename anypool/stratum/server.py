@@ -261,8 +261,8 @@ class StratumServer:
     async def create_job(self) -> Dict:
         try:
 
-            # Step 1: Fetch a fresh block template (rules per coin definition)
-            template = await self.rpc.call("getblocktemplate", [{"rules": coins.active().gbt_rules}])
+            # Step 1: Fetch a fresh block template (request per coin definition)
+            template = await self.rpc.call("getblocktemplate", coins.active().gbt_request())
             if not template or "previousblockhash" not in template:
                 print(f"[ERROR] Invalid block template: {template}")
                 return None
@@ -453,7 +453,8 @@ class StratumServer:
                             header_hex: str) -> bool:
         try:
             print("[SUBMIT] Building block for submission...")
-            complete_block = assemble_block(job, extra_nonce1, extra_nonce2, header_hex)
+            complete_block = assemble_block(job, extra_nonce1, extra_nonce2, header_hex,
+                                            has_mweb=coins.active().has_mweb)
 
             print("[SUBMIT] Submitting to network...")
             result = await self.rpc.call("submitblock", [complete_block])

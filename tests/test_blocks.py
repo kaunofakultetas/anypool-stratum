@@ -29,11 +29,34 @@ class TestAssembleBlock(unittest.TestCase):
     def test_block_1777_layout(self):
         job = build_job(vectors.TEMPLATE, "00000001")
 
-        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2, vectors.HEADER_HEX)
+        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2,
+                                   vectors.HEADER_HEX, has_mweb=True)
 
         expected_coinbase = (job["coinb1_full"] + vectors.EXTRANONCE1 +
                              vectors.EXTRANONCE2 + job["coinb2_full"])
         expected_block = vectors.HEADER_HEX + "01" + expected_coinbase + "01"
+
+        self.assertEqual(block_hex, expected_block)
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # For a coin WITHOUT MWEB (Dogecoin-style old fork) the
+    # block must end right after the last transaction — the
+    # Litecoin-family marker byte would corrupt it.
+    # -----------------------------------------------------------
+    def test_no_mweb_block_has_no_tail(self):
+        job = build_job(vectors.TEMPLATE, "00000001")
+
+        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2,
+                                   vectors.HEADER_HEX, has_mweb=False)
+
+        expected_coinbase = (job["coinb1_full"] + vectors.EXTRANONCE1 +
+                             vectors.EXTRANONCE2 + job["coinb2_full"])
+        expected_block = vectors.HEADER_HEX + "01" + expected_coinbase
 
         self.assertEqual(block_hex, expected_block)
 
@@ -54,7 +77,8 @@ class TestAssembleBlock(unittest.TestCase):
         ]
         job = build_job(template, "00000002")
 
-        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2, vectors.HEADER_HEX)
+        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2,
+                                   vectors.HEADER_HEX, has_mweb=True)
 
         self.assertIn("deadbeefcafebabe", block_hex)
         tx_count_pos = len(vectors.HEADER_HEX)
@@ -74,7 +98,8 @@ class TestAssembleBlock(unittest.TestCase):
         template["transactions"] = [{"txid": "cc" * 32, "data": "00"} for _ in range(300)]
         job = build_job(template, "00000003")
 
-        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2, vectors.HEADER_HEX)
+        block_hex = assemble_block(job, vectors.EXTRANONCE1, vectors.EXTRANONCE2,
+                                   vectors.HEADER_HEX, has_mweb=True)
 
         tx_count_pos = len(vectors.HEADER_HEX)
         # 301 transactions -> varint fd2d01 (0x012d little-endian)

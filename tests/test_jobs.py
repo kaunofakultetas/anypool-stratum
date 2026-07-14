@@ -44,6 +44,26 @@ class TestBuildJob(unittest.TestCase):
 
 
     # -----------------------------------------------------------
+    # Old daemons (pre-Bitcoin-Core-0.13 forks) provide only a
+    # "hash" field per transaction, no "txid" — build_job must
+    # fall back to it transparently.
+    # -----------------------------------------------------------
+    def test_txid_fallback_for_old_daemons(self):
+        tx_hash_be = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+        template = dict(vectors.TEMPLATE)
+        template["transactions"] = [{"hash": tx_hash_be, "data": "00"}]  # no "txid" key
+
+        job = build_job(template, "00000009")
+
+        expected_le = bytes.fromhex(tx_hash_be)[::-1].hex()
+        self.assertEqual(job["merkle_branch"], [expected_le])
+
+
+
+
+
+
+    # -----------------------------------------------------------
     # The prevhash conversion in isolation: template (BE) form
     # to the word-swapped stratum wire form from the logs.
     # -----------------------------------------------------------

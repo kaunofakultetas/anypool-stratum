@@ -4,20 +4,24 @@
 #  The contract every supported coin must fulfill. A coin is
 #  fully described by one frozen CoinDefinition instance:
 #  which PoW function it uses, what its difficulty-1 target
-#  is, which getblocktemplate rules to request, and which
-#  bech32 prefix its addresses carry on each network.
+#  is, which getblocktemplate rules to request, how its
+#  addresses turn into payout scripts, and whether its blocks
+#  carry an MWEB extension tail.
 #
 #  Adding a new coin never touches the mining/stratum code —
 #  create anypool/coins/<symbol>.py with one CoinDefinition
-#  and register it in anypool/coins/__init__.py.
+#  and register it in anypool/coins/__init__.py. Older
+#  Bitcoin Core forks without segwit (Dogecoin & friends)
+#  work by picking the Base58P2PKH address scheme, an empty
+#  gbt_rules list and has_mweb=False.
 #
 #  Used by:
-#    - coins/knf.py, coins/ltc.py — instantiate it
-#    - coins/__init__.py          — registry typing
+#    - coins/knf.py, coins/ltc.py, coins/doge.py — instantiate it
+#    - coins/__init__.py — registry typing
 # -----------------------------------------------------------
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
 
 
 
@@ -39,30 +43,21 @@ class CoinDefinition:
     #   target = difficulty_1_target // difficulty
     difficulty_1_target: int
 
-    # Rules to request from getblocktemplate
+    # Rules to request from getblocktemplate. Empty list for
+    # old daemons that predate the rules mechanism — the
+    # request object is then omitted entirely.
     gbt_rules: List[str]
 
-    # network name -> bech32 address prefix (hrp)
-    addr_prefixes: Dict[str, str] = field(default_factory=dict)
+    # How REWARD_ADDR becomes the coinbase payout script
+    # (Bech32P2WPKH or Base58P2PKH from coins/address.py)
+    address_scheme: object
 
-
-
-
-
-
-    # -----------------------------------------------------------
-    # addr_prefix
-    # -----------------------------------------------------------
-    #
-    # The bech32 prefix of this coin on the given network,
-    # e.g. KNF mainnet -> "knf", LTC testnet -> "tltc".
-    #
-    # Used by:
-    #   - config.py            — validate()
-    #   - mining/coinbase.py   — payout script construction
-    # -----------------------------------------------------------
-    def addr_prefix(self, network: str) -> str:
-        return self.addr_prefixes[network]
+    # Litecoin-family MWEB extension: when True, serialized
+    # blocks carry the MWEB tail after the transactions
+    # (marker byte + optional extension data). Must be False
+    # for plain Bitcoin Core forks like Dogecoin, or every
+    # submitted block would be malformed.
+    has_mweb: bool = False
 
 
 
@@ -73,10 +68,39 @@ class CoinDefinition:
     # networks
     # -----------------------------------------------------------
     #
-    # The network names this coin supports ("mainnet", ...).
+    # The network names this coin supports ("mainnet", ...) —
+    # delegated to the address scheme, which is the only part
+    # that differs per network.
     #
     # Used by:
     #   - config.py — validate()
     # -----------------------------------------------------------
     def networks(self) -> List[str]:
-        return list(self.addr_prefixes.keys())
+        return self.address_scheme.networks()
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # gbt_request
+    # -----------------------------------------------------------
+    #
+    # Builds the getblocktemplate params for this coin:
+    #
+    #   rules + longpollid  -> [{"rules": [...], "longpollid": x}]
+    #   rules only          -> [{"rules": [...]}]
+    #   nothing             -> []   (old daemons, plain poll)
+    #
+    # Used by:
+    #   - stratum/server.py — create_job()
+    #   - main.py           — longpoll_loop()
+    # -----------------------------------------------------------
+    def gbt_request(self, longpollid: Optional[str] = None) -> List[Dict]:
+        request = {}
+        if self.gbt_rules:
+            request["rules"] = self.gbt_rules
+        if longpollid:
+            request["longpollid"] = longpollid
+        return [request] if request else []

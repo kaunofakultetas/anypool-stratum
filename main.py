@@ -99,7 +99,7 @@ async def longpoll_loop(server: StratumServer):
         try:
             await server.rpc.call(
                 "getblocktemplate",
-                [{"rules": coins.active().gbt_rules, "longpollid": longpollid}],
+                coins.active().gbt_request(longpollid=longpollid),
                 timeout=LONGPOLL_TIMEOUT,
             )
         except Exception:
