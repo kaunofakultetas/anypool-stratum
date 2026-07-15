@@ -33,11 +33,6 @@ from anypool.stratum.server import StratumServer
 # Seconds between getblocktemplate polls
 JOB_REFRESH_INTERVAL = 5
 
-# Max seconds one longpoll request may hang at the node before
-# we re-issue it. The node answers much sooner when the chain
-# tip actually moves — this is only the recycle interval.
-LONGPOLL_TIMEOUT = 600
-
 
 
 
@@ -74,14 +69,23 @@ async def job_refresh_loop(server: StratumServer):
 # Instant new-block detection. Every block template carries a
 # "longpollid"; sending it back in another getblocktemplate
 # call makes the node HOLD that request open and only answer
-# once the chain tip moves (or the timeout recycles it). The
-# moment it answers we cut a new job, so miners stop hashing
-# stale work within milliseconds of a new block instead of
-# waiting for the next 5-second poll.
+# once the chain tip moves. The moment it answers we cut a
+# new job, so miners stop hashing stale work within
+# milliseconds of a new block instead of waiting for the
+# next 5-second poll.
 #
-# Any error (node restart, timeout, no job yet) just waits a
-# poll interval and retries — the job_refresh_loop keeps the
-# pool alive regardless.
+# IMPORTANT: the longpoll call uses timeout=None on purpose.
+# Bitcoin Core-style nodes never notice a client that gives
+# up on a longpoll — the abandoned request keeps occupying
+# one of the node's few RPC worker threads forever. A client
+# -side timeout therefore leaks one node thread per recycle
+# until the whole RPC work queue is saturated ("work queue
+# depth exceeded"). Letting the request hang indefinitely
+# means exactly ONE node thread is ever held by longpoll.
+#
+# Any error (node restart, dropped connection, no job yet)
+# just waits a poll interval and retries — the
+# job_refresh_loop keeps the pool alive regardless.
 #
 # Used by:
 #   - main.py — main()
@@ -100,10 +104,10 @@ async def longpoll_loop(server: StratumServer):
             await server.rpc.call(
                 "getblocktemplate",
                 coins.active().gbt_request(longpollid=longpollid),
-                timeout=LONGPOLL_TIMEOUT,
+                timeout=None,
             )
         except Exception:
-            # Timeout recycle or node hiccup — just re-arm
+            # Node hiccup or dropped connection — just re-arm
             await asyncio.sleep(JOB_REFRESH_INTERVAL)
             continue
 

@@ -70,14 +70,14 @@ class NodeRPC:
     # callers can treat a return value as a successful response.
     #
     # `timeout` overrides the 10s default — longpoll callers
-    # pass a large value because their request is MEANT to hang
-    # until the chain tip moves.
+    # pass None (no timeout at all) because their request is
+    # MEANT to hang until the chain tip moves.
     #
     # Used by:
     #   - stratum/server.py — create_job() and _submit_block()
     #   - main.py           — longpoll_loop()
     # -----------------------------------------------------------
-    async def call(self, method: str, params: List = None, timeout: float = DEFAULT_TIMEOUT) -> Any:
+    async def call(self, method: str, params: List = None, timeout: Optional[float] = DEFAULT_TIMEOUT) -> Any:
         if params is None:
             params = []
 
@@ -93,6 +93,13 @@ class NodeRPC:
 
         request_timeout = aiohttp.ClientTimeout(total=timeout)
         async with self.session.post(self.url, json=payload, timeout=request_timeout) as resp:
+
+            # Overloaded/broken nodes answer with an HTML error page —
+            # surface the real status instead of a JSON decode error
+            if resp.status != 200:
+                body = (await resp.text())[:200]
+                raise Exception(f"RPC HTTP {resp.status} from node: {body.strip()}")
+
             data = await resp.json()
             if "error" in data and data["error"]:
                 raise Exception(f"RPC Error: {data['error']}")
