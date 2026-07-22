@@ -43,12 +43,13 @@ Follow steps below to quickly start the stratum server with LTC testnet node and
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/kaunofakultetas/anypool-stratum.git
+   cd anypool-stratum
    ```
 
 2. **Copy sample docker-compose.yml and stack startup script:**
    ```
-   cp ./anypool-stratum/docker-compose.yml.sample docker-compose.yml
-   cp ./anypool-stratum/runUpdateThisStack.sh.sample runUpdateThisStack.sh
+   cp docker-compose.yml.sample docker-compose.yml
+   cp runUpdateThisStack.sh.sample runUpdateThisStack.sh
    ```
 
 3. **Configure docker-compose.yml environment variables:**
