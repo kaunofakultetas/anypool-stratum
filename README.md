@@ -10,7 +10,7 @@ A Stratum protocol to Full Node RPC adapter for mining Bitcoin-family coins (SHA
 
 
 
-# ❌ DO NOT USE IN PRODUCTION! ❌ <br/> ❌ DEVELOPMENT IN PROGRESS! ❌
+### ⚠️ Test before using in production ⚠️
 
 <br/>
 
