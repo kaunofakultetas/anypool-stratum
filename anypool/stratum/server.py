@@ -16,8 +16,10 @@
 #                        broadcast it to every miner.
 #    process_share()   — validate a submitted share against
 #                        pool and network targets.
-#    _submit_block()   — hand a network-grade share to the
-#                        node as a complete block.
+#    _start_block_submission() — launch the submission of a
+#                        network-grade share as a background
+#                        task, so the miner's submit response
+#                        NEVER waits on a node round-trip.
 #
 #  Per-connection protocol handling lives in connection.py;
 #  this module never parses stratum messages itself.
@@ -43,6 +45,14 @@ from anypool.stratum.errors import (
     ERROR_OTHER,
     ERROR_TIME_OUT_OF_RANGE,
 )
+
+
+# How many recently solved parents (job prevhashes a block
+# submission was launched for) the sibling-block guard in
+# _start_block_submission() remembers. Jobs themselves are
+# pruned at MAX_STORED_JOBS (10), so 50 parents is far more
+# history than any live share can still reference.
+MAX_SUBMITTED_PARENTS = 50
 
 
 
@@ -81,6 +91,18 @@ class StratumServer:
         # Connected miners; each gets a unique extranonce1
         self.connected_clients = set()
         self.extranonce1_counter = 0
+
+        # Parents (job prevhash, wire format) a block submission was
+        # already launched for — the sibling-block guard state of
+        # _start_block_submission(). A dict standing in for an
+        # insertion-ordered set so it can be pruned oldest-first.
+        self.submitted_parents = {}
+
+        # Strong references to in-flight background tasks (block
+        # submissions, job broadcasts): the event loop itself only
+        # keeps weak ones, so a fire-and-forget task could otherwise
+        # be garbage-collected mid-flight.
+        self.background_tasks = set()
 
         display.startup_banner(self.pool_difficulty)
 
@@ -179,6 +201,29 @@ class StratumServer:
     def remove_client(self, client) -> None:
         self.connected_clients.discard(client)
         print(f"[CLIENTS] Removed client. Total: {len(self.connected_clients)}")
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # _spawn
+    # -----------------------------------------------------------
+    #
+    # Runs a coroutine as a fire-and-forget background task while
+    # keeping a strong reference until it finishes — asyncio only
+    # holds weak references to tasks, so an unreferenced task can
+    # be garbage-collected mid-flight.
+    #
+    # Used by:
+    #   - stratum/server.py — create_job(), _start_block_submission()
+    # -----------------------------------------------------------
+    def _spawn(self, coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task
 
 
 
@@ -304,7 +349,7 @@ class StratumServer:
 
             if self.connected_clients:
                 print(f"[BROADCAST] BROADCASTING NEW JOB to {len(self.connected_clients)} clients...")
-                asyncio.create_task(self.broadcast_new_job())
+                self._spawn(self.broadcast_new_job())
 
             display.job_created_panel(job, self.pool_difficulty, self.network_difficulty,
                                       self.pool_target, self.network_target)
@@ -341,12 +386,18 @@ class StratumServer:
     #   3. Rebuild the header the miner hashed and its PoW
     #      hash (shares.build_header).
     #   4. hash <= pool target?     -> share accepted.
-    #      hash <= network target?  -> it is a full block,
-    #      submit it to the node.
+    #      hash <= network target?  -> it is a full block:
+    #      launch its submission as a background task
+    #      (_start_block_submission) and answer the miner
+    #      right away.
     #
     # Returns (accepted, error): accepted travels back to the
     # miner as the mining.submit result, error is a standard
     # stratum error tuple (or None) shown in the miner's log.
+    # The verdict deliberately does NOT depend on the node's
+    # submitblock outcome — the share met the target it was
+    # issued for, and waiting on the node here would hold the
+    # response (and the whole connection) hostage.
     #
     # Used by:
     #   - stratum/connection.py — handle_submit()
@@ -426,10 +477,15 @@ class StratumServer:
             )
 
 
-            # Step 5: A network-grade share is a block — submit it
+            # Step 5: A network-grade share is a block — submit it in
+            # the BACKGROUND. The node is at its busiest right after a
+            # block (validating, relaying, answering longpolls), and a
+            # response held back for that round-trip stalls the miner's
+            # whole stratum conversation: the read loop in
+            # connection.handle() processes one message at a time, so
+            # ASICs see a silent pool, declare it lagging and pause.
             if is_block:
-                if await self._submit_block(job, extra_nonce1, extra_nonce2, header_hex):
-                    self.blocks_found += 1
+                self._start_block_submission(job, extra_nonce1, extra_nonce2, header_hex)
 
             return is_accepted, (None if is_accepted else ERROR_LOW_DIFFICULTY)
 
@@ -441,8 +497,106 @@ class StratumServer:
             return False, ERROR_OTHER
 
         finally:
-            if self.shares_submitted > 0:
-                print(f"[STATS] Shares: {self.shares_accepted}/{self.shares_submitted} ({100*self.shares_accepted/self.shares_submitted:.1f}%) | Blocks: {self.blocks_found}")
+            self._print_stats()
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # _print_stats
+    # -----------------------------------------------------------
+    #
+    # One-line lifetime counters, printed after every processed
+    # share and again when a background block submission gets
+    # accepted (that is the moment blocks_found moves).
+    #
+    # Used by:
+    #   - stratum/server.py — process_share(), _submit_block_task()
+    # -----------------------------------------------------------
+    def _print_stats(self) -> None:
+        if self.shares_submitted == 0:
+            return
+        print(f"[STATS] Shares: {self.shares_accepted}/{self.shares_submitted} ({100*self.shares_accepted/self.shares_submitted:.1f}%) | Blocks: {self.blocks_found}")
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # _start_block_submission
+    # -----------------------------------------------------------
+    #
+    # Launches the submission of a solved block as a background
+    # task — process_share() must never wait on the node.
+    #
+    # Guard: ONE submission per parent. When blocks fall quickly
+    # an ASIC often solves the same job again before the clean-
+    # jobs notify reaches it; that second solve is a sibling of
+    # the block the node just accepted (same height, same parent)
+    # and can never become the best tip — submitting it only
+    # earns an "inconclusive" from a node that is busy connecting
+    # the first block. The parent is marked BEFORE the task runs
+    # so a sibling arriving mid-submission is caught as well; a
+    # FAILED submission unmarks it, so a later solve on that
+    # parent may try again. Keyed by prevhash rather than height:
+    # after a reorg the same height is mined on a NEW parent, and
+    # that block must still be submitted.
+    #
+    # Returns True when a submission task was launched, False
+    # when the sibling guard swallowed the block.
+    #
+    # Used by:
+    #   - stratum/server.py — process_share()
+    # -----------------------------------------------------------
+    def _start_block_submission(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
+                                header_hex: str) -> bool:
+        parent = job["prevhash"]
+
+        if parent in self.submitted_parents:
+            print("[SUBMIT] ⏭️  Sibling block NOT submitted: a block on this parent was already "
+                  "sent to the node (a second one can only be stale). Share stays accepted.")
+            return False
+
+        self.submitted_parents[parent] = True
+        while len(self.submitted_parents) > MAX_SUBMITTED_PARENTS:
+            del self.submitted_parents[next(iter(self.submitted_parents))]
+
+        self._spawn(self._submit_block_task(job, extra_nonce1, extra_nonce2, header_hex))
+        return True
+
+
+
+
+
+
+    # -----------------------------------------------------------
+    # _submit_block_task
+    # -----------------------------------------------------------
+    #
+    # The background half of a block submission. On acceptance,
+    # counts the block and IMMEDIATELY cuts the next job:
+    # submitblock only returns after the node connected the
+    # block, so getblocktemplate already describes the new tip
+    # and miners receive fresh work without waiting for the
+    # longpoll to fire (the longpoll stays as the safety net —
+    # create_job() recognizes the tip it already cut a job for
+    # and dedupes the double trigger). On failure the parent is
+    # unmarked so a later block on it may be submitted after all.
+    #
+    # Used by:
+    #   - stratum/server.py — _start_block_submission()
+    # -----------------------------------------------------------
+    async def _submit_block_task(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
+                                 header_hex: str) -> None:
+        if await self._submit_block(job, extra_nonce1, extra_nonce2, header_hex):
+            self.blocks_found += 1
+            self._print_stats()
+            await self.create_job()
+        else:
+            self.submitted_parents.pop(job["prevhash"], None)
 
 
 
@@ -462,7 +616,7 @@ class StratumServer:
     # ("bad-txnmrklroot", "high-hash", ...) on rejection.
     #
     # Used by:
-    #   - stratum/server.py — process_share()
+    #   - stratum/server.py — _submit_block_task()
     # -----------------------------------------------------------
     async def _submit_block(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
                             header_hex: str) -> bool:
