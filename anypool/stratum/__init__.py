@@ -1,16 +1,22 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Stratum Subpackage
 #
-#  The network-facing layer speaking stratum v1 to miners:
+#  The protocol-NEUTRAL half of the miner-facing layer. Both
+#  stratum dialects this pool speaks are newline-delimited
+#  JSON-RPC over TCP, and everything below the message
+#  vocabulary lives here exactly once:
 #
-#    server.py     — StratumServer: pool state, client
-#                    registry, job/share/block orchestration
-#    connection.py — StratumConnection: one per miner,
-#                    JSON-RPC framing + method dispatch
+#    base.py — BaseStratumConnection (socket lifecycle, line
+#              framing, wire debug logging) and
+#              BasePoolServer (client registry, statistics,
+#              background-task bookkeeping)
 #
-#  This layer delegates all actual mining math to anypool/
-#  mining/ and all daemon communication to anypool/node/.
+#  The dialects themselves — Bitcoin stratum v1 (mining.*)
+#  and CryptoNote login/job/submit — live in their family
+#  packages under anypool/families/, which subclass the two
+#  bases.
 #
 #  Used by:
-#    - main.py — creates the server and wires connections
-# -----------------------------------------------------------
+#    - families/bitcoin/server.py, connection.py
+#    - families/cryptonote/server.py, connection.py
+############################################################

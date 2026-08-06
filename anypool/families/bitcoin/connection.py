@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Stratum Client Connection
 #
 #  One StratumConnection per connected miner. Owns the raw
@@ -12,48 +12,55 @@
 #    mining.submit     — miner submits a share; forwarded to
 #                        StratumServer.process_share()
 #
-#  This layer only frames/parses messages and manages the
-#  connection lifecycle — all mining decisions (validation,
-#  targets, job state) belong to server.py.
+#  Framing and connection lifecycle live in the shared base
+#  (anypool/stratum/base.py) — this file is only the dialect:
+#  message dispatch and the mining.* handlers. All mining
+#  decisions (validation, targets, job state) belong to
+#  server.py.
 #
 #  Used by:
-#    - main.py — handle_client() is the asyncio.start_server
-#                connection callback
-# -----------------------------------------------------------
+#    - families/bitcoin/runner.py — handle_client() is the
+#      asyncio.start_server connection callback
+############################################################
 
-import asyncio
-import json
+
 import random
 
-from anypool import coins, config
-from anypool.mining.shares import validate_share_params, version_bits_allowed
-from anypool.stratum.errors import ERROR_OTHER, ERROR_UNAUTHORIZED, ERROR_VERSION_ROLLING
+from anypool import coins
+from anypool.families.bitcoin.shares import validate_share_params, version_bits_allowed
+from anypool.families.bitcoin.errors import ERROR_OTHER, ERROR_UNAUTHORIZED, ERROR_VERSION_ROLLING
+from anypool.stratum.base import BaseStratumConnection
 
 
 
 
-class StratumConnection:
 
 
-    # -----------------------------------------------------------
+
+
+class StratumConnection(BaseStratumConnection):
+
+
+
+
+
+
+    ############################################################
     # __init__
-    # -----------------------------------------------------------
+    ############################################################
     #
-    # Binds the connection to its TCP stream and asks the
-    # server for a unique extranonce1 — this is what makes
-    # every miner's coinbase (and thus merkle root) distinct.
+    # Socket lifecycle and framing come from the shared base;
+    # this adds the Bitcoin-dialect state and asks the server
+    # for a unique extranonce1 — this is what makes every
+    # miner's coinbase (and thus merkle root) distinct.
     #
     # Used by:
-    #   - stratum/connection.py — handle_client()
-    # -----------------------------------------------------------
-    def __init__(self, reader, writer, server):
-        self.reader = reader
-        self.writer = writer
-        self.server = server
+    #   - handle_client() (bottom of this file)
+    ############################################################
 
-        self.authorized = False
-        self.worker_name = None
-        self.miner_software = "Unknown"
+    def __init__(self, reader, writer, server):
+        super().__init__(reader, writer, server)
+
         self.subscription_id = None
 
         # Unique per connection, prepended to every coinbase
@@ -64,161 +71,23 @@ class StratumConnection:
         # meaning submitted version bits must be zero
         self.version_rolling_mask = 0
 
-        self.client_ip = writer.get_extra_info('peername')[0]
 
 
 
 
 
-
-    # -----------------------------------------------------------
-    # handle
-    # -----------------------------------------------------------
-    #
-    # The connection's main loop: read one JSON line at a
-    # time and dispatch it, until the miner disconnects or an
-    # unrecoverable error occurs. Read timeouts (30 min) are
-    # NOT fatal — idle miners stay connected. Cleanup always
-    # runs: the client is removed from broadcasts and the
-    # socket is closed.
-    #
-    # Used by:
-    #   - stratum/connection.py — handle_client()
-    # -----------------------------------------------------------
-    async def handle(self):
-        try:
-            self.server.add_client(self)
-
-            while True:
-                try:
-                    data = await asyncio.wait_for(self.reader.readline(), timeout=1800.0)
-
-                    # Empty read means the client closed the connection
-                    if not data:
-                        print(f"[CONNECTION] {self.client_ip} closed connection")
-                        break
-
-                    try:
-                        raw_message = data.decode().strip()
-                        if not raw_message:
-                            continue
-
-                        if config.DEBUG:
-                            print(f"[WIRE-IN ] {self.client_ip} >> {raw_message[:400]}")
-
-                        message = json.loads(raw_message)
-                        await self.process_message(message)
-
-                    except json.JSONDecodeError:
-                        print(f"[CONNECTION] {self.client_ip} sent invalid JSON: {raw_message[:200]}")
-                        continue
-
-                except asyncio.TimeoutError:
-                    print(f"[CONNECTION] {self.client_ip} timeout, continuing...")
-                    continue
-
-                except Exception as conn_error:
-                    if "Broken pipe" in str(conn_error) or "Connection reset" in str(conn_error):
-                        print(f"[CONNECTION] {self.client_ip} disconnected")
-                    else:
-                        print(f"[CONNECTION] {self.client_ip} error: {conn_error}")
-                    break
-
-        except Exception as e:
-            print(f"[CONNECTION] {self.client_ip or 'unknown'} handler error: {e}")
-
-        finally:
-            # Always deregister and close, whatever happened above
-            self.server.remove_client(self)
-            try:
-                if not self.writer.is_closing():
-                    self.writer.close()
-                    await self.writer.wait_closed()
-            except Exception as e:
-                print(f"[CLEANUP] Error closing connection: {e}")
-
-
-
-
-
-
-    # -----------------------------------------------------------
-    # send_response
-    # -----------------------------------------------------------
-    #
-    # JSON-RPC response to a specific request id (replies to
-    # subscribe / authorize / submit).
-    #
-    # Used by:
-    #   - stratum/connection.py — the handle_* methods below
-    # -----------------------------------------------------------
-    async def send_response(self, message_id, result=None, error=None):
-        response = {"id": message_id, "result": result, "error": error}
-        await self.send_message(response)
-
-
-
-
-
-
-    # -----------------------------------------------------------
-    # send_notification
-    # -----------------------------------------------------------
-    #
-    # Server-initiated JSON-RPC notification (id: null), used
-    # for mining.set_difficulty and mining.notify pushes.
-    #
-    # Used by:
-    #   - stratum/connection.py — handle_subscribe()
-    #   - stratum/server.py     — broadcast_new_job()
-    # -----------------------------------------------------------
-    async def send_notification(self, method, params):
-        notification = {"id": None, "method": method, "params": params}
-        await self.send_message(notification)
-
-
-
-
-
-
-    # -----------------------------------------------------------
-    # send_message
-    # -----------------------------------------------------------
-    #
-    # Serializes one message onto the wire (newline-delimited
-    # JSON). Errors are re-raised so callers can treat the
-    # client as disconnected.
-    #
-    # Used by:
-    #   - stratum/connection.py — send_response() / send_notification()
-    # -----------------------------------------------------------
-    async def send_message(self, message):
-        try:
-            data = json.dumps(message) + "\n"
-            if config.DEBUG:
-                print(f"[WIRE-OUT] {self.client_ip} << {data.strip()[:400]}")
-            self.writer.write(data.encode())
-            await self.writer.drain()
-        except Exception as e:
-            print(f"[SEND] Failed to send message to client: {e}")
-            raise  # Re-raise to let caller handle cleanup
-
-
-
-
-
-
-    # -----------------------------------------------------------
+    ############################################################
     # process_message
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Routes one parsed stratum message to its handler.
     # Unknown methods are logged and ignored (miners send
     # various optional extensions we don't need).
     #
     # Used by:
-    #   - stratum/connection.py — handle()
-    # -----------------------------------------------------------
+    #   - stratum/base.py — BaseStratumConnection.handle()
+    ############################################################
+
     async def process_message(self, message):
         method = message.get("method")
         params = message.get("params", [])
@@ -260,9 +129,9 @@ class StratumConnection:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # handle_subscribe
-    # -----------------------------------------------------------
+    ############################################################
     #
     # The stratum handshake. Replies with the subscription
     # ids, this connection's extranonce1 and the extranonce2
@@ -271,8 +140,9 @@ class StratumConnection:
     # without waiting for the next broadcast.
     #
     # Used by:
-    #   - stratum/connection.py — process_message()
-    # -----------------------------------------------------------
+    #   - process_message() (above)
+    ############################################################
+
     async def handle_subscribe(self, msg_id, params):
 
         # First param is the miner's user agent, e.g. "cpuminer/2.5.1"
@@ -317,9 +187,9 @@ class StratumConnection:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # handle_configure
-    # -----------------------------------------------------------
+    ############################################################
     #
     # BIP310 protocol extension negotiation. version-rolling
     # (AsicBoost) is granted when the active coin allows it:
@@ -335,8 +205,9 @@ class StratumConnection:
     # Expected params: [[ext_name, ...], {"ext.param": value}]
     #
     # Used by:
-    #   - stratum/connection.py — process_message()
-    # -----------------------------------------------------------
+    #   - process_message() (above)
+    ############################################################
+
     async def handle_configure(self, msg_id, params):
         requested = params[0] if params and isinstance(params[0], list) else []
         options = params[1] if len(params) > 1 and isinstance(params[1], dict) else {}
@@ -361,17 +232,20 @@ class StratumConnection:
 
 
 
-    # -----------------------------------------------------------
+
+
+    ############################################################
     # handle_authorize
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Records the worker name. No password check — this pool
     # accepts any worker (fine for a private/teaching pool,
     # do NOT expose publicly as-is).
     #
     # Used by:
-    #   - stratum/connection.py — process_message()
-    # -----------------------------------------------------------
+    #   - process_message() (above)
+    ############################################################
+
     async def handle_authorize(self, msg_id, params):
         if len(params) >= 1:
             self.worker_name = params[0]
@@ -386,9 +260,9 @@ class StratumConnection:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # handle_submit
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Receives one share. Miners that skipped mining.authorize
     # are auto-authorized from the worker name in the submit —
@@ -400,10 +274,13 @@ class StratumConnection:
     #
     # Expected params:
     #   [worker_name, job_id, extra_nonce2, ntime, nonce]
+    #   [worker_name, job_id, extra_nonce2, ntime, nonce,
+    #    version_bits]                     (BIP310 rolling)
     #
     # Used by:
-    #   - stratum/connection.py — process_message()
-    # -----------------------------------------------------------
+    #   - process_message() (above)
+    ############################################################
+
     async def handle_submit(self, msg_id, params):
 
         # Auto-authorize if the miner never sent mining.authorize
@@ -448,19 +325,18 @@ class StratumConnection:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # handle_client
-# -----------------------------------------------------------
+############################################################
 #
 # The asyncio.start_server callback: wraps every accepted
 # TCP connection in a StratumConnection and runs its loop
 # until disconnect.
 #
 # Used by:
-#   - main.py — asyncio.start_server(...)
-# -----------------------------------------------------------
+#   - families/bitcoin/runner.py — asyncio.start_server(...)
+############################################################
+
 async def handle_client(reader, writer, server):
     connection = StratumConnection(reader, writer, server)
     await connection.handle()

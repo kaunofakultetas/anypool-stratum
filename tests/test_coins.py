@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Coin Registry & Definitions
 #
 #  Covers anypool/coins/: every registered coin must be
@@ -8,7 +8,8 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
@@ -19,33 +20,73 @@ from tests.test_base58 import DOGE_ADDR, DOGE_HASH160
 
 
 
+
+
+
+
 class TestRegistry(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
-    # Every registered coin must be complete and consistent.
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
+    # Every registered coin must be complete and consistent —
+    # the contract differs per family, so each is checked
+    # against the fields ITS family actually uses.
+    ############################################################
+
     def test_definitions_are_consistent(self):
         for symbol, coin in coins.REGISTRY.items():
             with self.subTest(coin=symbol):
                 self.assertEqual(coin.name, symbol)
-                self.assertTrue(callable(coin.pow_hash))
-                self.assertGreater(coin.difficulty_1_target, 0)
+                self.assertIn(coin.family, ("bitcoin", "cryptonote"))
                 self.assertGreater(len(coin.networks()), 0)
 
+                if coin.family == "bitcoin":
+                    self.assertTrue(callable(coin.pow_hash))
+                    self.assertGreater(coin.difficulty_1_target, 0)
+                else:
+                    self.assertGreaterEqual(coin.cn_variant, 0)
+                    self.assertGreater(coin.reserve_size, 0)
 
 
 
 
 
-    # -----------------------------------------------------------
+
+    ############################################################
+    # Every registered coin must resolve to a runner module —
+    # a coin whose family has no implementation would only
+    # fail at boot, in production.
+    ############################################################
+
+    def test_every_coin_resolves_to_a_runner(self):
+        import os
+        from unittest import mock
+
+        from anypool import families
+
+        for symbol in coins.REGISTRY:
+            with self.subTest(coin=symbol):
+                with mock.patch.dict(os.environ, {"COIN": symbol}), \
+                     mock.patch("anypool.config.COIN", symbol):
+                    runner = families.active()
+                    self.assertTrue(callable(runner.run))
+
+
+
+
+
+
+    ############################################################
     # active() must follow the COIN environment variable
     # (pinned to KNF by tests/__init__.py).
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_active_coin(self):
         self.assertIs(coins.active(), coins.REGISTRY["KNF"])
-
-
 
 
 
@@ -57,10 +98,15 @@ class TestRegistry(unittest.TestCase):
 class TestGbtRequest(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Modern Litecoin-family daemons get the rules list, plus
     # the longpollid when re-arming a longpoll.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_modern_coin_request(self):
         knf = coins.get_coin("KNF")
 
@@ -75,10 +121,11 @@ class TestGbtRequest(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Old daemons (Dogecoin) get NO request object at all for a
     # plain poll — some predate the rules mechanism entirely.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_old_coin_request(self):
         doge = coins.get_coin("DOGE")
 
@@ -88,10 +135,13 @@ class TestGbtRequest(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+
+
+    ############################################################
     # Bitcoin Core REFUSES getblocktemplate without the segwit
     # rule — it must always be requested.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_btc_request(self):
         btc = coins.get_coin("BTC")
 
@@ -108,15 +158,18 @@ class TestGbtRequest(unittest.TestCase):
 
 
 
-
-
 class TestAddressSchemes(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # KNF (bech32 scheme) must produce the P2WPKH script from
     # the accepted block 1777.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_bech32_scheme(self):
         knf = coins.get_coin("KNF")
         script = knf.address_scheme.payout_script(vectors.REWARD_ADDR, "mainnet")
@@ -127,9 +180,10 @@ class TestAddressSchemes(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # DOGE (base58 scheme) must produce a legacy P2PKH script.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_base58_scheme(self):
         doge = coins.get_coin("DOGE")
         script = doge.address_scheme.payout_script(DOGE_ADDR, "mainnet")
@@ -140,10 +194,11 @@ class TestAddressSchemes(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Feeding one coin's address to another coin's scheme must
     # fail — the config validator relies on this.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_cross_coin_addresses_rejected(self):
         with self.assertRaises(ValueError):
             coins.get_coin("KNF").address_scheme.payout_script(DOGE_ADDR, "mainnet")
@@ -153,12 +208,15 @@ class TestAddressSchemes(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+
+
+    ############################################################
     # BTC bech32 scheme, checked against the canonical BIP173
     # reference vectors (same 20-byte program on both networks).
     # testnet3 and testnet4 share the "tb" prefix — the same
     # address must decode identically on both.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_btc_bech32_scheme(self):
         btc = coins.get_coin("BTC")
         expected_script = "0014751e76e8199196d454941c45d1b3a323f1433bd6"
@@ -187,22 +245,29 @@ class TestAddressSchemes(unittest.TestCase):
 
 
 
-
-
 class TestVersionRolling(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # BTC carries the standard BIP320 mask; every other coin
     # must decline version rolling (mask 0) — Dogecoin's
     # version bits encode the AuxPoW chain id, and the scrypt
     # coins were validated without rolling.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_masks(self):
         self.assertEqual(coins.get_coin("BTC").version_rolling_mask, 0x1FFFE000)
         for symbol in ("KNF", "LTC", "DOGE"):
             self.assertEqual(coins.get_coin(symbol).version_rolling_mask, 0,
                              f"{symbol} must not allow version rolling")
+
+
+
+
 
 
 

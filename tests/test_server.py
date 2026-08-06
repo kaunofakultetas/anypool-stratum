@@ -1,8 +1,9 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Share-to-Block Submission Flow
 #
-#  Covers stratum/server.py around a found block, the path
-#  that used to stall ASICs when blocks fell quickly:
+#  Covers families/bitcoin/server.py around a found block —
+#  the guarantees that keep ASICs fed when blocks fall
+#  quickly:
 #
 #    - process_share() must answer the miner WITHOUT waiting
 #      for the node's submitblock round-trip
@@ -19,21 +20,26 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import asyncio
 import unittest
 
-from anypool.mining.jobs import build_job, stratum_prevhash
-from anypool.stratum.server import MAX_SUBMITTED_PARENTS, StratumServer
+from anypool.families.bitcoin.jobs import build_job, stratum_prevhash
+from anypool.families.bitcoin.server import MAX_SUBMITTED_PARENTS, StratumServer
 from tests import vectors
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # FakeNodeRPC
-# -----------------------------------------------------------
+############################################################
 #
 # Stands in for node/rpc.py's NodeRPC. Records every call,
 # answers getblocktemplate from `template`, and answers
@@ -44,14 +50,35 @@ from tests import vectors
 #
 # Used by:
 #   - tests/test_server.py — every test case
-# -----------------------------------------------------------
+############################################################
+
 class FakeNodeRPC:
+
+
+
+
+
+
+    ############################################################
+    # Starts with no template, no queued verdicts, no gate.
+    ############################################################
 
     def __init__(self):
         self.calls = []
         self.template = None
         self.submit_results = []
         self.gate = None
+
+
+
+
+
+
+    ############################################################
+    # The NodeRPC.call() signature, answered from the fields:
+    # submitblock waits on `gate` (when set) then pops a
+    # queued verdict; getblocktemplate returns `template`.
+    ############################################################
 
     async def call(self, method, params=None, timeout=10.0):
         self.calls.append((method, params))
@@ -63,15 +90,28 @@ class FakeNodeRPC:
             return self.template
         return None
 
+
+
+
+
+
+    ############################################################
+    # Every block hex handed to submitblock, in call order.
+    ############################################################
+
     def submitted_blocks(self):
         return [params[0] for (method, params) in self.calls if method == "submitblock"]
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # make_server
-# -----------------------------------------------------------
+############################################################
 #
 # A StratumServer with its node RPC swapped for a FakeNodeRPC
 # and the block 1777 job stored — difficulty state snapshotted
@@ -79,7 +119,8 @@ class FakeNodeRPC:
 #
 # Used by:
 #   - tests/test_server.py — the test cases below
-# -----------------------------------------------------------
+############################################################
+
 def make_server():
     server = StratumServer()
     server.rpc = FakeNodeRPC()
@@ -96,9 +137,13 @@ def make_server():
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # submit_share
-# -----------------------------------------------------------
+############################################################
 #
 # One process_share() call for the stored job. Defaults to
 # the real winning nonce of block 1777; pass another nonce to
@@ -106,7 +151,8 @@ def make_server():
 #
 # Used by:
 #   - tests/test_server.py — the test cases below
-# -----------------------------------------------------------
+############################################################
+
 async def submit_share(server, job, nonce=vectors.SHARE_NONCE):
     return await server.process_share(
         "tester.worker1", job["job_id"], vectors.EXTRANONCE1,
@@ -116,9 +162,13 @@ async def submit_share(server, job, nonce=vectors.SHARE_NONCE):
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # drain
-# -----------------------------------------------------------
+############################################################
 #
 # Awaits every background task the server has in flight (a
 # task may spawn follow-up tasks, hence the loop). Bounded so
@@ -126,7 +176,8 @@ async def submit_share(server, job, nonce=vectors.SHARE_NONCE):
 #
 # Used by:
 #   - tests/test_server.py — the test cases below
-# -----------------------------------------------------------
+############################################################
+
 async def drain(server):
     async def _all():
         while server.background_tasks:
@@ -136,9 +187,13 @@ async def drain(server):
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # moved_tip_template
-# -----------------------------------------------------------
+############################################################
 #
 # The template the node would report AFTER our block 1777 got
 # accepted: one height up, previous hash pointing at some new
@@ -146,7 +201,8 @@ async def drain(server):
 #
 # Used by:
 #   - tests/test_server.py — the test cases below
-# -----------------------------------------------------------
+############################################################
+
 def moved_tip_template(new_tip_hash):
     template = dict(vectors.TEMPLATE)
     template["previousblockhash"] = new_tip_hash
@@ -156,15 +212,25 @@ def moved_tip_template(new_tip_hash):
 
 
 
+
+
+
+
 class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
-    # -----------------------------------------------------------
-    # The regression that stalled ASICs: the mining.submit
-    # verdict must come back even while the node has not yet
-    # answered submitblock. The fake node hangs on `gate` — the
-    # old code awaited it inline and this test would time out.
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
+    # The ASIC-stall guarantee: the mining.submit verdict must
+    # come back even while the node has not yet answered
+    # submitblock. The fake node hangs on `gate`, so any
+    # implementation that awaits the submission inline times
+    # this test out.
+    ############################################################
+
     async def test_share_response_does_not_wait_for_node(self):
         server, job = make_server()
         server.rpc.gate = asyncio.Event()      # node "busy": submitblock hangs
@@ -184,11 +250,16 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.blocks_found, 1)
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The background submission must hand the node the exact
     # serialization the network accepted for block 1777:
     # header + tx count + full coinbase + MWEB marker.
-    # -----------------------------------------------------------
+    ############################################################
+
     async def test_submitted_block_is_byte_exact(self):
         server, job = make_server()
 
@@ -204,10 +275,15 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.blocks_found, 1)
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # A share above the pool target but below network grade is
     # just a share — no submission task, no node traffic.
-    # -----------------------------------------------------------
+    ############################################################
+
     async def test_plain_share_is_not_submitted(self):
         server, job = make_server()
         job["pool_target"] = 2 ** 256 - 1      # anything is a share...
@@ -222,11 +298,16 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.submitted_parents, {})
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # After the node accepts our block, the follow-up job must
     # be cut right away (submitblock returns only once the tip
     # moved) — not seconds later when a poll comes around.
-    # -----------------------------------------------------------
+    ############################################################
+
     async def test_accepted_block_cuts_new_job_immediately(self):
         server, job = make_server()
         new_tip = "5c" * 32
@@ -246,16 +327,25 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
+
+
 class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The "inconclusive" scenario: the miner solves the SAME job
     # twice before the clean-jobs notify reaches it. The first
     # solve is submitted; the sibling must be accepted as a
     # share but never reach the node — even while the first
     # submission is still in flight.
-    # -----------------------------------------------------------
+    ############################################################
+
     async def test_sibling_block_is_not_submitted(self):
         server, job = make_server()
         job["pool_target"] = 2 ** 256 - 1      # every share solves a block
@@ -281,10 +371,15 @@ class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.shares_accepted, 2)
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # A submission the node rejects must unmark the parent, so
     # a later solve on that parent gets its own attempt.
-    # -----------------------------------------------------------
+    ############################################################
+
     async def test_failed_submission_allows_retry_on_parent(self):
         server, job = make_server()
         job["pool_target"] = 2 ** 256 - 1
@@ -306,11 +401,16 @@ class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.blocks_found, 1)
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The guard's memory must stay bounded and forget the
     # OLDEST parents first — same pruning contract as the
     # JobManager's job store.
-    # -----------------------------------------------------------
+    ############################################################
+
     async def test_submitted_parents_are_pruned(self):
         server, job = make_server()
         server.rpc.gate = asyncio.Event()      # hold every submission in flight
@@ -331,6 +431,10 @@ class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
         server.rpc.submit_results = ["inconclusive"] * total
         server.rpc.gate.set()
         await drain(server)
+
+
+
+
 
 
 

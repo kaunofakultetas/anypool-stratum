@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — BTC Testnet3 Block 5062063
 #
 #  The SHA256d counterpart of the block 1777 suite: the pool
@@ -15,14 +15,19 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
 from anypool import config
-from anypool.mining.jobs import build_job
-from anypool.mining.shares import build_header
+from anypool.families.bitcoin.jobs import build_job
+from anypool.families.bitcoin.shares import build_header
 from tests import vectors
+
+
+
+
 
 
 
@@ -30,10 +35,15 @@ from tests import vectors
 class TestBtcBlock5062063(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Switch the pool config to the BTC testnet3 setup that
     # mined the block; restore the suite-wide KNF config after.
-    # -----------------------------------------------------------
+    ############################################################
+
     def setUp(self):
         self._saved = (config.COIN, config.COIN_NETWORK,
                        config.REWARD_ADDR, config.COINBASE_MESSAGE)
@@ -43,6 +53,14 @@ class TestBtcBlock5062063(unittest.TestCase):
         config.COINBASE_MESSAGE = "/AnyPool Miner from VU KNF/"
 
 
+
+
+
+
+    ############################################################
+    # Restore the suite-wide KNF config for the other modules.
+    ############################################################
+
     def tearDown(self):
         (config.COIN, config.COIN_NETWORK,
          config.REWARD_ADDR, config.COINBASE_MESSAGE) = self._saved
@@ -50,11 +68,14 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+
+
+    ############################################################
     # build_job() fed with the block's template must reproduce
     # the exact job the pool broadcast — including the merkle
     # branch over the 8 template transactions.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_job_fields(self):
         job = build_job(vectors.BTC_TEMPLATE, "00000002")
 
@@ -70,11 +91,14 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+
+
+    ############################################################
     # The winning share must rebuild the accepted block's
     # 80-byte header and its hash (for SHA256d the PoW hash IS
     # the block hash), and pass both targets.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_winning_share_round_trip(self):
         job = build_job(vectors.BTC_TEMPLATE, "00000002")
 
@@ -95,10 +119,13 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+
+
+    ############################################################
     # Any other nonce must change the header and fail the
     # min-difficulty target.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_wrong_nonce_fails_targets(self):
         job = build_job(vectors.BTC_TEMPLATE, "00000002")
 
@@ -110,6 +137,10 @@ class TestBtcBlock5062063(unittest.TestCase):
 
         self.assertNotEqual(header_hex, vectors.BTC_HEADER_HEX)
         self.assertGreater(int(pow_hash, 16), vectors.BTC_NETWORK_TARGET)
+
+
+
+
 
 
 

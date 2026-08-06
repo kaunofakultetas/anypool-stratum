@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Base58Check Address Decoding
 #
 #  Covers anypool/crypto/base58.py. The anchor vector is the
@@ -9,7 +9,8 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
@@ -25,9 +26,13 @@ DOGE_VERSION_MAINNET = 0x1e
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # reference_base58check_encode
-# -----------------------------------------------------------
+############################################################
 #
 # Independent encoder used to generate test inputs, so the
 # decoder is checked against separate logic rather than a
@@ -35,7 +40,8 @@ DOGE_VERSION_MAINNET = 0x1e
 #
 # Used by:
 #   - tests/test_base58.py — property tests below
-# -----------------------------------------------------------
+############################################################
+
 def reference_base58check_encode(version: int, payload: bytes) -> str:
     raw = bytes([version]) + payload
     raw += sha256d(raw)[:4]
@@ -57,15 +63,18 @@ def reference_base58check_encode(version: int, payload: bytes) -> str:
 
 
 
-
-
 class TestDogecoinAddress(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The known Dogecoin address must decode to its documented
     # version byte and hash160.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_known_address_decodes(self):
         version, payload = base58check_decode(DOGE_ADDR)
         self.assertEqual(version, DOGE_VERSION_MAINNET)
@@ -76,9 +85,10 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # And it must produce the standard P2PKH scriptPubKey.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_known_address_to_script(self):
         script = p2pkh_script_for_address(DOGE_ADDR, DOGE_VERSION_MAINNET)
         self.assertEqual(script, "76a914" + DOGE_HASH160 + "88ac")
@@ -88,10 +98,11 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # The same address with a wrong expected version (e.g. the
     # testnet byte) must be refused — wrong-network guard.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_wrong_network_rejected(self):
         with self.assertRaises(ValueError):
             p2pkh_script_for_address(DOGE_ADDR, 0x71)
@@ -103,16 +114,19 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
 
-
-
 class TestBase58checkDecode(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Round trip: whatever the reference encoder produces, the
     # decoder must take apart again — including payloads with
     # leading zero bytes (the '1'-padding corner case).
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_round_trip(self):
         payloads = [
             bytes.fromhex(DOGE_HASH160),
@@ -134,10 +148,11 @@ class TestBase58checkDecode(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Corrupted checksums, invalid characters and too-short
     # strings must all raise.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_malformed_inputs(self):
         corrupted = DOGE_ADDR[:-1] + ("2" if DOGE_ADDR[-1] != "2" else "3")
         with self.assertRaises(ValueError):
@@ -148,6 +163,10 @@ class TestBase58checkDecode(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             base58check_decode("111")    # shorter than checksum
+
+
+
+
 
 
 

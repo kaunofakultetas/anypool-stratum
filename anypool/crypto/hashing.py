@@ -1,42 +1,51 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Hashing & Hex Primitives
 #
 #  The lowest-level building blocks of the pool: double
-#  SHA256, the Scrypt proof-of-work hash and the two hex
-#  byte-order helpers that the stratum protocol forces on us
-#  (miners expect some header fields byte-reversed, and the
-#  previous block hash reversed in 4-byte words).
+#  SHA256, the Scrypt and SHA256d proof-of-work hashes, and
+#  the two hex byte-order helpers that the stratum protocol
+#  forces on us (miners expect some header fields
+#  byte-reversed, and the previous block hash reversed in
+#  4-byte words).
 #
 #  Everything here is a pure function of its inputs — no
 #  state, no config — which makes this the easiest module in
 #  the codebase to unit test against known mined blocks.
 #
 #  Used by:
-#    - crypto/merkle.py  — sha256d for tree hashing
-#    - mining/coinbase.py — txid hashing
-#    - mining/shares.py   — header assembly + PoW hash
-#    - mining/jobs.py     — prevhash conversion for job fields
-#    - stratum/server.py  — display of hashes in log panels
-# -----------------------------------------------------------
+#    - crypto/merkle.py, crypto/base58.py — sha256d
+#    - coins/ definitions — their pow_hash functions
+#    - families/bitcoin/jobs.py, shares.py, server.py —
+#      field conversions, header assembly, PoW hashing
+############################################################
+
 
 import hashlib
 
-import scrypt
+# scrypt (a C extension) is imported lazily inside
+# scrypt_pow_hash() so CryptoNote-family pools and the parts
+# of the test suite that never scrypt-hash do not need the
+# module installed.
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # sha256d
-# -----------------------------------------------------------
+############################################################
 #
 # Bitcoin's workhorse: SHA256 applied twice. Used for txids,
 # merkle tree nodes and the block hash itself.
 #
 # Used by:
-#   - crypto/merkle.py, mining/coinbase.py, mining/shares.py,
-#     stratum/server.py
-# -----------------------------------------------------------
+#   - crypto/merkle.py, crypto/base58.py
+#   - families/bitcoin/ — coinbase, jobs, shares, server
+############################################################
+
 def sha256d(data: bytes) -> bytes:
     return hashlib.sha256(hashlib.sha256(data).digest()).digest()
 
@@ -47,11 +56,9 @@ def sha256d(data: bytes) -> bytes:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # scrypt_pow_hash
-# -----------------------------------------------------------
+############################################################
 #
 # The Scrypt proof-of-work hash (N=1024, r=1, p=1) used by
 # Litecoin-family coins. Takes the exact 80-byte serialized
@@ -59,10 +66,12 @@ def sha256d(data: bytes) -> bytes:
 # to be compared numerically against a target.
 #
 # Used by:
-#   - mining/shares.py — build_header()
+#   - families/bitcoin/shares.py — build_header()
 #   - coins/ definitions — as their pow_hash function
-# -----------------------------------------------------------
+############################################################
+
 def scrypt_pow_hash(header_bytes: bytes) -> str:
+    import scrypt
     if len(header_bytes) != 80:
         raise ValueError("Header must be 80 bytes for Scrypt hashing.")
     return scrypt.hash(header_bytes, header_bytes, 1024, 1, 1, 32)[::-1].hex()
@@ -74,11 +83,9 @@ def scrypt_pow_hash(header_bytes: bytes) -> str:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # sha256d_pow_hash
-# -----------------------------------------------------------
+############################################################
 #
 # The SHA256d proof-of-work hash used by Bitcoin itself. For
 # SHA256 coins the PoW hash IS the block hash — double SHA256
@@ -87,7 +94,8 @@ def scrypt_pow_hash(header_bytes: bytes) -> str:
 #
 # Used by:
 #   - coins/btc.py — as its pow_hash function
-# -----------------------------------------------------------
+############################################################
+
 def sha256d_pow_hash(header_bytes: bytes) -> str:
     if len(header_bytes) != 80:
         raise ValueError("Header must be 80 bytes for SHA256d hashing.")
@@ -100,11 +108,9 @@ def sha256d_pow_hash(header_bytes: bytes) -> str:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # reverse_hex
-# -----------------------------------------------------------
+############################################################
 #
 # Reverse a hex string byte-wise (in 2-char chunks). This is
 # how a whole field is flipped between big-endian display
@@ -122,8 +128,9 @@ def sha256d_pow_hash(header_bytes: bytes) -> str:
 # +---------------------------------------+
 #
 # Used by:
-#   - mining/shares.py, mining/jobs.py, stratum/server.py
-# -----------------------------------------------------------
+#   - families/bitcoin/jobs.py, shares.py, server.py
+############################################################
+
 def reverse_hex(hex_str: str) -> str:
     return ''.join(reversed([hex_str[i:i+2] for i in range(0, len(hex_str), 2)]))
 
@@ -134,11 +141,9 @@ def reverse_hex(hex_str: str) -> str:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # reverse_hex_4b_chunks
-# -----------------------------------------------------------
+############################################################
 #
 # Reverse a 32-byte hex string in 4-byte words (8 hex chars
 # each). The stratum protocol transmits the previous block
@@ -158,11 +163,12 @@ def reverse_hex(hex_str: str) -> str:
 # +---------------------------------------------------------------------------------------+
 #
 # Used by:
-#   - mining/shares.py, mining/jobs.py, stratum/server.py
-# -----------------------------------------------------------
+#   - families/bitcoin/jobs.py, shares.py, server.py
+############################################################
+
 def reverse_hex_4b_chunks(hex_str: str) -> str:
     hex_str_final = ""
-    for i in range(0, 64, 8):  # Process 4-byte chunks (8 hex chars each)
+    for i in range(0, 64, 8):
         chunk = hex_str[i:i+8]
         hex_str_final += reverse_hex(chunk)
     return hex_str_final

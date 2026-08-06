@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Known-Good Test Vectors
 #
 #  Two accepted blocks, both captured from the pool's own logs
@@ -17,15 +17,23 @@
 #
 #  Used by:
 #    - tests/test_hashing.py, test_merkle.py, test_coinbase.py,
-#      test_jobs.py, test_shares.py, test_blocks.py,
-#      test_btc_block.py
-# -----------------------------------------------------------
+#      test_jobs.py, test_header.py, test_blocks.py,
+#      test_btc_block.py, test_server.py, test_coins.py,
+#      test_bech32.py
+############################################################
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # The block template as getblocktemplate reported it
 # (transactions list was empty — coinbase-only block)
-# -----------------------------------------------------------
+############################################################
+
 TEMPLATE = {
     "version": 0x20000000,
     "previousblockhash": "96fbd8c5a13bc5b07d791d00dbd696e28db358d3b14b9ee9715c5c9a76240bb0",
@@ -39,9 +47,16 @@ TEMPLATE = {
 }
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # The job as the pool cut it from that template
-# -----------------------------------------------------------
+############################################################
+
 JOB_PREVHASH_WIRE = "76240bb0715c5c9ab14b9ee98db358d3dbd696e27d791d00a13bc5b096fbd8c5"
 JOB_VERSION = "20000000"
 JOB_NBITS = "1c3fffc0"
@@ -63,9 +78,16 @@ REWARD_ADDR = "knf1q6v5tfdrvaunzz60c6as9fx9dttzc98j435ll4a"
 PAYOUT_SCRIPT = "0014d328b4b46cef262169f8d7605498ad5ac5829e55"
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # The winning share exactly as the ASIC submitted it
-# -----------------------------------------------------------
+############################################################
+
 EXTRANONCE1 = "00000001"     # assigned by the pool to this connection
 EXTRANONCE2 = "09000000"     # chosen by the miner
 SHARE_NTIME = "6a5639fc"
@@ -90,9 +112,16 @@ SCRYPT_HASH = "00000000285b5d789f013d5858e55e39a0d2c2cd7350741c6e1672b58a9e03ea"
 BLOCK_SHA256 = "d5c1ecebcfd630b06bf380461169d67005d300e8dc9b3d30447f7d17eb40a144"
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # Targets in effect when the share arrived
-# -----------------------------------------------------------
+############################################################
+
 POOL_DIFFICULTY = 100000
 POOL_TARGET = 0x00000000a7c5ac471b4784230fcf80dc33721d53cddd6e04c059210385c67dfe
 NETWORK_TARGET = 0x000000003fffc000000000000000000000000000000000000000000000000000
@@ -104,9 +133,9 @@ NETWORK_TARGET = 0x000000003fffc000000000000000000000000000000000000000000000000
 
 
 
-# ===========================================================
-#  BTC testnet3 block 5062063 — SHA256d, 8 transactions
-# ===========================================================
+############################################################
+# BTC testnet3 block 5062063 — SHA256d, 8 transactions
+############################################################
 #
 # Mined 2026-07-14 20:29:02 through this pool (job 00000002)
 # during a testnet 20-minute min-difficulty window (nbits
@@ -118,6 +147,7 @@ NETWORK_TARGET = 0x000000003fffc000000000000000000000000000000000000000000000000
 #   COIN=BTC, COIN_NETWORK=testnet3
 #   REWARD_ADDR=tb1qzlz8wv7qu40xx66sqc3r98qkgsys6vwtp3k0nj
 #   COINBASE_MESSAGE=/AnyPool Miner from VU KNF/
+############################################################
 
 # The block template as getblocktemplate reported it,
 # reconstructed from the logged job + coinbase debug boxes.

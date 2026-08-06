@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Bech32 Address Decoding
 #
 #  A self-contained bech32 (BIP-173) decoder, used for one
@@ -11,9 +11,9 @@
 #  README asks the operator to configure.
 #
 #  Used by:
-#    - mining/coinbase.py — p2wpkh_script_for_address() when
-#                    building the payout output
-# -----------------------------------------------------------
+#    - coins/address.py — the Bech32P2WPKH address scheme
+############################################################
+
 
 from typing import List, Optional, Tuple
 
@@ -24,16 +24,21 @@ BECH32_CHARKEY = {c: i for i, c in enumerate(BECH32_CHARSET)}
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # bech32_polymod
-# -----------------------------------------------------------
+############################################################
 #
 # The BIP-173 checksum polynomial. Internal building block of
 # checksum verification — not meant to be called directly.
 #
 # Used by:
 #   - bech32.py — bech32_verify_checksum()
-# -----------------------------------------------------------
+############################################################
+
 def bech32_polymod(values: List[int]) -> int:
     GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
     chk = 1
@@ -52,18 +57,17 @@ def bech32_polymod(values: List[int]) -> int:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # bech32_hrp_expand
-# -----------------------------------------------------------
+############################################################
 #
 # Expands the human-readable part ("tltc", "knf", ...) into
 # the value sequence the checksum is computed over.
 #
 # Used by:
 #   - bech32.py — bech32_verify_checksum()
-# -----------------------------------------------------------
+############################################################
+
 def bech32_hrp_expand(hrp: str) -> List[int]:
     return [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
 
@@ -74,18 +78,17 @@ def bech32_hrp_expand(hrp: str) -> List[int]:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # bech32_verify_checksum
-# -----------------------------------------------------------
+############################################################
 #
 # True if the address checksum is valid for the given
 # human-readable part and data values.
 #
 # Used by:
 #   - bech32.py — bech32_decode()
-# -----------------------------------------------------------
+############################################################
+
 def bech32_verify_checksum(hrp: str, data: List[int]) -> bool:
     return bech32_polymod(bech32_hrp_expand(hrp) + data) == 1
 
@@ -96,11 +99,9 @@ def bech32_verify_checksum(hrp: str, data: List[int]) -> bool:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # bech32_decode
-# -----------------------------------------------------------
+############################################################
 #
 # Splits and validates a bech32 string. Returns the tuple
 # (hrp, data-values-without-checksum) or (None, None) on any
@@ -108,7 +109,8 @@ def bech32_verify_checksum(hrp: str, data: List[int]) -> bool:
 #
 # Used by:
 #   - bech32.py — p2wpkh_script_for_address()
-# -----------------------------------------------------------
+############################################################
+
 def bech32_decode(addr: str) -> Tuple[Optional[str], Optional[List[int]]]:
     addr = addr.strip()
 
@@ -147,11 +149,9 @@ def bech32_decode(addr: str) -> Tuple[Optional[str], Optional[List[int]]]:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # convertbits
-# -----------------------------------------------------------
+############################################################
 #
 # General power-of-2 base conversion (BIP-173 reference
 # implementation). Used to regroup the 5-bit bech32 values
@@ -159,7 +159,8 @@ def bech32_decode(addr: str) -> Tuple[Optional[str], Optional[List[int]]]:
 #
 # Used by:
 #   - bech32.py — p2wpkh_script_for_address()
-# -----------------------------------------------------------
+############################################################
+
 def convertbits(data: List[int], frombits: int, tobits: int, pad: bool = True) -> Optional[List[int]]:
     acc = 0
     bits = 0
@@ -189,11 +190,9 @@ def convertbits(data: List[int], frombits: int, tobits: int, pad: bool = True) -
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # p2wpkh_script_for_address
-# -----------------------------------------------------------
+############################################################
 #
 # The public entry point of this module: decodes a native
 # segwit address, checks it belongs to the expected network
@@ -207,8 +206,9 @@ def convertbits(data: List[int], frombits: int, tobits: int, pad: bool = True) -
 # that is not witness v0 / 20 bytes.
 #
 # Used by:
-#   - mining/coinbase.py — payout output of the coinbase tx
-# -----------------------------------------------------------
+#   - coins/address.py — Bech32P2WPKH.payout_script()
+############################################################
+
 def p2wpkh_script_for_address(addr: str, expected_prefix: str) -> str:
     hrp, data = bech32_decode(addr)
 

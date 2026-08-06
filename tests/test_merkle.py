@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Merkle Tree
 #
 #  Covers anypool/crypto/merkle.py, in two layers:
@@ -12,7 +12,8 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
@@ -23,9 +24,13 @@ from tests import vectors
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # reference_merkle_root
-# -----------------------------------------------------------
+############################################################
 #
 # Straightforward bottom-up merkle root, implemented
 # independently from the module under test so the branch
@@ -33,7 +38,8 @@ from tests import vectors
 #
 # Used by:
 #   - tests/test_merkle.py — property tests below
-# -----------------------------------------------------------
+############################################################
+
 def reference_merkle_root(tx_hashes_hex):
     level = [bytes.fromhex(h) for h in tx_hashes_hex]
     while len(level) > 1:
@@ -49,14 +55,17 @@ def reference_merkle_root(tx_hashes_hex):
 
 
 
-
-
 class TestBlock1777(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # A coinbase-only block has an empty merkle branch.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_single_tx_branch_is_empty(self):
         coinbase_txid = "e24f32b428288decdf51631020c509bb204549af34a0d5d7e4cb75900056db97"
         self.assertEqual(calculate_merkle_branch([coinbase_txid], 0), [])
@@ -66,11 +75,12 @@ class TestBlock1777(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # With an empty branch, the root is the leaf itself. This is
     # exactly what happened for the accepted share of block 1777:
     # the real coinbase txid became the header's merkle root.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_root_equals_coinbase_txid(self):
         coinbase_hex = (vectors.COINB1 + vectors.EXTRANONCE1 +
                         vectors.EXTRANONCE2 + vectors.COINB2)
@@ -86,16 +96,19 @@ class TestBlock1777(unittest.TestCase):
 
 
 
-
-
 class TestBranchRootProperty(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # For trees of 2..8 leaves: the branch computed for the
     # coinbase (index 0) must fold back to the same root as the
     # independent reference implementation.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_branch_folds_back_to_root(self):
         for tx_count in range(2, 9):
             with self.subTest(tx_count=tx_count):
@@ -112,11 +125,12 @@ class TestBranchRootProperty(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # The branch of the coinbase must not depend on the coinbase
     # itself — that is what allows the pool to compute ONE branch
     # per job while every miner has a different extranonce.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_branch_independent_of_coinbase(self):
         other_txids = [sha256d(bytes([i])).hex() for i in range(1, 5)]
 
@@ -133,11 +147,16 @@ class TestBranchRootProperty(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Empty input is a valid degenerate case.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_empty_input(self):
         self.assertEqual(calculate_merkle_branch([], 0), [])
+
+
+
+
 
 
 

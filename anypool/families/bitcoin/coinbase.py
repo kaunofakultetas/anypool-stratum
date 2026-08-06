@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Coinbase Transaction Builder
 #
 #  Builds the coinbase transaction for a block template and
@@ -21,8 +21,9 @@
 #             actual block we submit to the node.
 #
 #  Used by:
-#    - mining/jobs.py — build_job() calls build_coinbase_parts()
-# -----------------------------------------------------------
+#    - families/bitcoin/jobs.py — build_job() calls build_coinbase_parts()
+############################################################
+
 
 import struct
 from typing import Dict
@@ -32,17 +33,23 @@ from anypool import coins, config, display
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # to_varint
-# -----------------------------------------------------------
+############################################################
 #
 # Bitcoin variable-length integer encoding, as hex. Used for
 # script lengths, output counts and the block's tx count.
 #
 # Used by:
-#   - mining/coinbase.py — script/output lengths
-#   - mining/blocks.py   — transaction count of the full block
-# -----------------------------------------------------------
+#   - build_coinbase_parts() (below) — script/output lengths
+#   - families/bitcoin/blocks.py — transaction count of the
+#     full block
+############################################################
+
 def to_varint(i: int) -> str:
     if i < 0xfd:
         return f"{i:02x}"
@@ -60,11 +67,9 @@ def to_varint(i: int) -> str:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # bip34_height_push
-# -----------------------------------------------------------
+############################################################
 #
 # BIP34 requires the block height as the first push in the
 # coinbase scriptSig. Encodes the height with Bitcoin Core's
@@ -73,8 +78,9 @@ def to_varint(i: int) -> str:
 # push-length byte. Compatible with all Bitcoin-based coins.
 #
 # Used by:
-#   - mining/coinbase.py — build_coinbase_parts()
-# -----------------------------------------------------------
+#   - build_coinbase_parts() (below)
+############################################################
+
 def bip34_height_push(height: int) -> bytes:
     if height == 0:
         return b'\x00'  # Minimal encoding for zero
@@ -103,11 +109,9 @@ def bip34_height_push(height: int) -> bytes:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # build_coinbase_parts
-# -----------------------------------------------------------
+############################################################
 #
 # Assembles the coinbase transaction for a getblocktemplate
 # result and returns its stratum halves:
@@ -126,13 +130,15 @@ def bip34_height_push(height: int) -> bytes:
 #   | coinbase message   <-- coinb2 starts here
 #   | sequence | outputs | [witness stack] | locktime
 #
-# Outputs: the full block reward to REWARD_ADDR (P2WPKH),
-# plus the witness commitment output when the template
-# provides one (segwit blocks).
+# Outputs: the full block reward to REWARD_ADDR (P2WPKH or
+# legacy P2PKH — the coin's address scheme decides), plus
+# the witness commitment output when the template provides
+# one (segwit blocks).
 #
 # Used by:
-#   - mining/jobs.py — build_job()
-# -----------------------------------------------------------
+#   - families/bitcoin/jobs.py — build_job()
+############################################################
+
 def build_coinbase_parts(template: Dict) -> Dict[str, str]:
 
     height = int(template["height"])

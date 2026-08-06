@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Stratum Server Core
 #
 #  The stateful heart of the pool. StratumServer owns:
@@ -25,20 +25,21 @@
 #  this module never parses stratum messages itself.
 #
 #  Used by:
-#    - main.py       — creates the single StratumServer
-#    - stratum/connection.py — calls into it per miner message
-# -----------------------------------------------------------
+#    - families/bitcoin/runner.py     — creates the single StratumServer
+#    - families/bitcoin/connection.py — calls into it per miner message
+############################################################
 
-import asyncio
+
 from typing import Dict
 
 from anypool import coins, config, display
 from anypool.crypto.hashing import reverse_hex, reverse_hex_4b_chunks, sha256d
-from anypool.mining.blocks import assemble_block
-from anypool.mining.jobs import JobManager, build_job
-from anypool.mining.shares import build_header, ntime_within_range
+from anypool.families.bitcoin.blocks import assemble_block
+from anypool.families.bitcoin.jobs import JobManager, build_job
+from anypool.families.bitcoin.shares import build_header, ntime_within_range
 from anypool.node.rpc import NodeRPC
-from anypool.stratum.errors import (
+from anypool.stratum.base import BasePoolServer
+from anypool.families.bitcoin.errors import (
     ERROR_DUPLICATE_SHARE,
     ERROR_JOB_NOT_FOUND,
     ERROR_LOW_DIFFICULTY,
@@ -57,29 +58,34 @@ MAX_SUBMITTED_PARENTS = 50
 
 
 
-class StratumServer:
 
 
-    # -----------------------------------------------------------
+
+
+class StratumServer(BasePoolServer):
+
+
+
+
+
+
+    ############################################################
     # __init__
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Wires up the RPC client and JobManager, zeroes the stats,
     # derives the initial pool target from POOL_DIFFICULTY and
     # prints the startup banner.
     #
     # Used by:
-    #   - main.py — once, at startup
-    # -----------------------------------------------------------
+    #   - families/bitcoin/runner.py — run(), once at startup
+    ############################################################
+
     def __init__(self):
+        super().__init__()
+
         self.rpc = NodeRPC()
         self.job_manager = JobManager()
-
-        # Lifetime statistics
-        self.shares_submitted = 0
-        self.shares_accepted = 0
-        self.shares_rejected = 0
-        self.blocks_found = 0
 
         # Difficulty / target state (network side is learned
         # from the first block template)
@@ -88,8 +94,7 @@ class StratumServer:
         self.pool_difficulty = config.POOL_DIFFICULTY
         self.pool_target = self.calculate_mining_target(config.POOL_DIFFICULTY)
 
-        # Connected miners; each gets a unique extranonce1
-        self.connected_clients = set()
+        # Each miner gets a unique extranonce1
         self.extranonce1_counter = 0
 
         # Parents (job prevhash, wire format) a block submission was
@@ -98,12 +103,6 @@ class StratumServer:
         # insertion-ordered set so it can be pruned oldest-first.
         self.submitted_parents = {}
 
-        # Strong references to in-flight background tasks (block
-        # submissions, job broadcasts): the event loop itself only
-        # keeps weak ones, so a fire-and-forget task could otherwise
-        # be garbage-collected mid-flight.
-        self.background_tasks = set()
-
         display.startup_banner(self.pool_difficulty)
 
 
@@ -111,9 +110,9 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # calculate_mining_target
-    # -----------------------------------------------------------
+    ############################################################
     #
     # difficulty -> target. A share is valid when its hash,
     # read as a 256-bit integer, is at or below the target.
@@ -121,8 +120,9 @@ class StratumServer:
     # coin's definition.
     #
     # Used by:
-    #   - stratum/server.py — __init__() and create_job()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — __init__() and create_job()
+    ############################################################
+
     def calculate_mining_target(self, difficulty: int) -> int:
         return coins.active().difficulty_1_target // difficulty
 
@@ -131,16 +131,17 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # calculate_mining_difficulty
-    # -----------------------------------------------------------
+    ############################################################
     #
     # target -> difficulty. The inverse of the above, used to
     # express the network target as a human-readable number.
     #
     # Used by:
-    #   - stratum/server.py — create_job()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — create_job()
+    ############################################################
+
     def calculate_mining_difficulty(self, target: int) -> int:
         return coins.active().difficulty_1_target // target
 
@@ -149,17 +150,18 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # next_extranonce1
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Hands out a unique 4-byte extranonce1 per connection so
     # every miner hashes a distinct coinbase (and can never
     # duplicate another miner's work).
     #
     # Used by:
-    #   - stratum/connection.py — StratumConnection.__init__()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/connection.py — StratumConnection.__init__()
+    ############################################################
+
     def next_extranonce1(self) -> str:
         self.extranonce1_counter += 1
         return f"{self.extranonce1_counter:08x}"
@@ -169,70 +171,9 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
-    # add_client
-    # -----------------------------------------------------------
-    #
-    # Registers a freshly connected miner for job broadcasts.
-    #
-    # Used by:
-    #   - stratum/connection.py — StratumConnection.handle()
-    # -----------------------------------------------------------
-    def add_client(self, client) -> None:
-        self.connected_clients.add(client)
-        print(f"[CLIENTS] Added client. Total: {len(self.connected_clients)}")
-
-
-
-
-
-
-    # -----------------------------------------------------------
-    # remove_client
-    # -----------------------------------------------------------
-    #
-    # Drops a miner from the broadcast list (disconnect or
-    # send failure). Safe to call twice.
-    #
-    # Used by:
-    #   - stratum/connection.py — StratumConnection.handle() cleanup
-    #   - stratum/server.py     — broadcast_new_job() on send errors
-    # -----------------------------------------------------------
-    def remove_client(self, client) -> None:
-        self.connected_clients.discard(client)
-        print(f"[CLIENTS] Removed client. Total: {len(self.connected_clients)}")
-
-
-
-
-
-
-    # -----------------------------------------------------------
-    # _spawn
-    # -----------------------------------------------------------
-    #
-    # Runs a coroutine as a fire-and-forget background task while
-    # keeping a strong reference until it finishes — asyncio only
-    # holds weak references to tasks, so an unreferenced task can
-    # be garbage-collected mid-flight.
-    #
-    # Used by:
-    #   - stratum/server.py — create_job(), _start_block_submission()
-    # -----------------------------------------------------------
-    def _spawn(self, coro) -> asyncio.Task:
-        task = asyncio.create_task(coro)
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
-        return task
-
-
-
-
-
-
-    # -----------------------------------------------------------
+    ############################################################
     # broadcast_new_job
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Pushes the current job to every connected miner: first a
     # mining.set_difficulty, then the mining.notify with
@@ -241,9 +182,10 @@ class StratumServer:
     # and removed.
     #
     # Used by:
-    #   - stratum/server.py — create_job()
-    #   - main.py   — after the initial job
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — create_job()
+    #   - families/bitcoin/runner.py — after the initial job
+    ############################################################
+
     async def broadcast_new_job(self) -> None:
         job = self.job_manager.current_job
         if not job or not self.connected_clients:
@@ -280,12 +222,12 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # create_job
-    # -----------------------------------------------------------
+    ############################################################
     #
     # The job pipeline, run at startup and then every few
-    # seconds by the refresh loop in main.py:
+    # seconds by the refresh loop in runner.py:
     #
     #   1. getblocktemplate from the node.
     #   2. If it describes the work we are already mining
@@ -300,25 +242,32 @@ class StratumServer:
     # job construction failed (the refresh loop just retries).
     #
     # Used by:
-    #   - main.py       — initial job + refresh loop
-    #   - stratum/connection.py — handle_subscribe() when no job exists
-    # -----------------------------------------------------------
+    #   - families/bitcoin/runner.py — run() (initial job),
+    #     job_refresh_loop(), longpoll_loop()
+    #   - families/bitcoin/connection.py — handle_subscribe()
+    #     when no job exists yet
+    #   - _submit_block_task() below — cut the follow-up job
+    ############################################################
+
     async def create_job(self) -> Dict:
         try:
-
-            # Step 1: Fetch a fresh block template (request per coin definition)
+            # STEP 1: fetch a fresh block template (request per
+            # coin definition)
+            # =================================================
             template = await self.rpc.call("getblocktemplate", coins.active().gbt_request())
             if not template or "previousblockhash" not in template:
                 print(f"[ERROR] Invalid block template: {template}")
                 return None
 
 
-            # Step 2: Nothing changed? Keep the job miners are working on.
+            # STEP 2: nothing changed? Keep the job miners are working on
+            # ===========================================================
             if self.job_manager.is_same_work(template, self.network_target):
                 return self.job_manager.current_job
 
 
-            # Step 3: Refresh difficulty and target state
+            # STEP 3: refresh difficulty and target state
+            # ===========================================
             self.network_target = int(template["target"], 16)
             self.network_difficulty = self.calculate_mining_difficulty(self.network_target)
             self.pool_target = self.calculate_mining_target(config.POOL_DIFFICULTY)
@@ -334,12 +283,13 @@ class StratumServer:
             display.new_block_panel(template["height"] - 1, template["previousblockhash"])
 
 
-            # Step 4: Build, store and broadcast the new job.
+            # STEP 4: build, store and broadcast the new job.
             # The difficulty state is snapshotted INTO the job: a late
             # share must be judged against the difficulty the miner was
             # actually given for this job, not whatever is current when
             # the share arrives (testnet's 20-minute rule flips the
             # difficulty constantly, see POLL_DIFF_DROPPER).
+            # =========================================================
             job = build_job(template, self.job_manager.next_job_id())
             job["pool_difficulty"] = self.pool_difficulty
             job["pool_target"] = self.pool_target
@@ -373,9 +323,9 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # process_share
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Judges one submitted share:
     #
@@ -400,16 +350,17 @@ class StratumServer:
     # response (and the whole connection) hostage.
     #
     # Used by:
-    #   - stratum/connection.py — handle_submit()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/connection.py — handle_submit()
+    ############################################################
+
     async def process_share(self, worker_name: str, job_id: str, extra_nonce1: str,
                             extra_nonce2: str, ntime: str, nonce: str,
                             version_bits: str = "00000000"):
         self.shares_submitted += 1
 
         try:
-
-            # Step 1: Find the job this share belongs to
+            # STEP 1: find the job this share belongs to
+            # ==========================================
             job = self.job_manager.get(job_id)
             if not job:
                 print("[SHARE] Stale/unknown job_id; rejecting")
@@ -417,7 +368,8 @@ class StratumServer:
                 return False, ERROR_JOB_NOT_FOUND
 
 
-            # Step 2: Cheap sanity gates before any hashing work
+            # STEP 2: cheap sanity gates before any hashing work
+            # ==================================================
             if not ntime_within_range(job["ntime"], ntime):
                 print(f"[SHARE] ntime {ntime} outside allowed window of job ntime {job['ntime']}; rejecting")
                 self.shares_rejected += 1
@@ -442,17 +394,19 @@ class StratumServer:
             ], color="red")
 
 
-            # Step 3: Rebuild the header the miner hashed
+            # STEP 3: rebuild the header the miner hashed
+            # ===========================================
             result_hash, header_hex, header_bytes = build_header(
                 job, extra_nonce1, extra_nonce2, ntime, nonce, context="process_share",
                 version_bits=version_bits
             )
 
 
-            # Step 4: Compare against the targets THIS JOB was issued
+            # STEP 4: compare against the targets THIS JOB was issued
             # under (snapshotted in create_job) — the current pool/network
             # state may already describe a newer job at a different
             # difficulty, which must not affect this share's verdict.
+            # ============================================================
             hash_int = int(result_hash, 16)
             is_accepted = hash_int <= job["pool_target"]
             is_block = is_accepted and hash_int <= job["network_target"]
@@ -477,13 +431,14 @@ class StratumServer:
             )
 
 
-            # Step 5: A network-grade share is a block — submit it in
+            # STEP 5: a network-grade share is a block — submit it in
             # the BACKGROUND. The node is at its busiest right after a
             # block (validating, relaying, answering longpolls), and a
             # response held back for that round-trip stalls the miner's
             # whole stratum conversation: the read loop in
             # connection.handle() processes one message at a time, so
             # ASICs see a silent pool, declare it lagging and pause.
+            # =========================================================
             if is_block:
                 self._start_block_submission(job, extra_nonce1, extra_nonce2, header_hex)
 
@@ -504,30 +459,9 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
-    # _print_stats
-    # -----------------------------------------------------------
-    #
-    # One-line lifetime counters, printed after every processed
-    # share and again when a background block submission gets
-    # accepted (that is the moment blocks_found moves).
-    #
-    # Used by:
-    #   - stratum/server.py — process_share(), _submit_block_task()
-    # -----------------------------------------------------------
-    def _print_stats(self) -> None:
-        if self.shares_submitted == 0:
-            return
-        print(f"[STATS] Shares: {self.shares_accepted}/{self.shares_submitted} ({100*self.shares_accepted/self.shares_submitted:.1f}%) | Blocks: {self.blocks_found}")
-
-
-
-
-
-
-    # -----------------------------------------------------------
+    ############################################################
     # _start_block_submission
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Launches the submission of a solved block as a background
     # task — process_share() must never wait on the node.
@@ -549,8 +483,9 @@ class StratumServer:
     # when the sibling guard swallowed the block.
     #
     # Used by:
-    #   - stratum/server.py — process_share()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — process_share()
+    ############################################################
+
     def _start_block_submission(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
                                 header_hex: str) -> bool:
         parent = job["prevhash"]
@@ -572,9 +507,9 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # _submit_block_task
-    # -----------------------------------------------------------
+    ############################################################
     #
     # The background half of a block submission. On acceptance,
     # counts the block and IMMEDIATELY cuts the next job:
@@ -587,8 +522,9 @@ class StratumServer:
     # unmarked so a later block on it may be submitted after all.
     #
     # Used by:
-    #   - stratum/server.py — _start_block_submission()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — _start_block_submission()
+    ############################################################
+
     async def _submit_block_task(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
                                  header_hex: str) -> None:
         if await self._submit_block(job, extra_nonce1, extra_nonce2, header_hex):
@@ -603,9 +539,9 @@ class StratumServer:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # _submit_block
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Assembles the complete block around the already-verified
     # header and hands it to the node. The header comes from
@@ -616,8 +552,9 @@ class StratumServer:
     # ("bad-txnmrklroot", "high-hash", ...) on rejection.
     #
     # Used by:
-    #   - stratum/server.py — _submit_block_task()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — _submit_block_task()
+    ############################################################
+
     async def _submit_block(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
                             header_hex: str) -> bool:
         try:

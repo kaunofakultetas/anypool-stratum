@@ -1,13 +1,15 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Coin — LTC (Litecoin)
 #
 #  Scrypt PoW with native segwit addresses and MWEB extension
-#  block support. This is the reference definition the pool
-#  was originally built and tested against (LTC testnet4).
+#  block support — the fully-featured end of the Bitcoin
+#  family in this registry, and the reference definition for
+#  modern Litecoin-lineage forks (see knf.py for one).
 #
 #  Used by:
 #    - coins/__init__.py — registered in the coin registry
-# -----------------------------------------------------------
+############################################################
+
 
 from anypool.coins.address import Bech32P2WPKH
 from anypool.coins.base import CoinDefinition

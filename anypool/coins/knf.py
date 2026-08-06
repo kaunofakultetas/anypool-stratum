@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Coin — KNF (KnfCoin)
 #
 #  KnfCoin is a Litecoin fork, so it inherits Scrypt PoW,
@@ -8,7 +8,8 @@
 #
 #  Used by:
 #    - coins/__init__.py — registered in the coin registry
-# -----------------------------------------------------------
+############################################################
+
 
 from anypool.coins.address import Bech32P2WPKH
 from anypool.coins.base import CoinDefinition

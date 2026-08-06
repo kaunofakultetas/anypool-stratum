@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Hashing & Hex Primitives
 #
 #  Covers anypool/crypto/hashing.py. The Scrypt test hashes
@@ -8,7 +8,8 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
@@ -24,12 +25,21 @@ from tests import vectors
 
 
 
+
+
+
+
 class TestSha256d(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Double SHA256 of an empty string is a well-known constant.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_known_vector_empty_input(self):
         self.assertEqual(
             sha256d(b"").hex(),
@@ -41,10 +51,11 @@ class TestSha256d(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # sha256d of block 1777's header equals its block hash
     # (byte-reversed for display, as printed by the pool).
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_header_hash(self):
         header_bytes = bytes.fromhex(vectors.HEADER_HEX)
         self.assertEqual(
@@ -59,15 +70,18 @@ class TestSha256d(unittest.TestCase):
 
 
 
-
-
 class TestScryptPowHash(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The crown jewel: the exact 80-byte header the ASIC solved
     # must produce the exact PoW hash the network accepted.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_pow_hash(self):
         header_bytes = bytes.fromhex(vectors.HEADER_HEX)
         self.assertEqual(scrypt_pow_hash(header_bytes), vectors.SCRYPT_HASH)
@@ -77,16 +91,15 @@ class TestScryptPowHash(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Anything that is not exactly 80 bytes must be refused.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_rejects_wrong_length(self):
         with self.assertRaises(ValueError):
             scrypt_pow_hash(b"\x00" * 79)
         with self.assertRaises(ValueError):
             scrypt_pow_hash(b"\x00" * 81)
-
-
 
 
 
@@ -110,19 +123,29 @@ class TestSha256dPowHash(unittest.TestCase):
     GENESIS_HASH = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # For SHA256 coins the PoW hash IS the block hash: hashing
     # the genesis header must give the genesis block hash.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_bitcoin_genesis(self):
         header_bytes = bytes.fromhex(self.GENESIS_HEADER)
         self.assertEqual(sha256d_pow_hash(header_bytes), self.GENESIS_HASH)
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The genesis hash must satisfy the difficulty-1 target —
     # exactly the comparison process_share() performs.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_genesis_meets_difficulty_1(self):
         from anypool import coins
         btc = coins.get_coin("BTC")
@@ -131,9 +154,14 @@ class TestSha256dPowHash(unittest.TestCase):
         self.assertLessEqual(hash_int, btc.difficulty_1_target)
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Anything that is not exactly 80 bytes must be refused.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_rejects_wrong_length(self):
         with self.assertRaises(ValueError):
             sha256d_pow_hash(b"\x00" * 79)
@@ -147,14 +175,17 @@ class TestSha256dPowHash(unittest.TestCase):
 
 
 
-
-
 class TestReverseHex(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # The example straight from the function's docstring.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_byte_reversal(self):
         self.assertEqual(reverse_hex("0123456789abcdef"), "efcdab8967452301")
 
@@ -163,9 +194,10 @@ class TestReverseHex(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Reversing twice must be the identity.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_round_trip(self):
         original = vectors.TEMPLATE["previousblockhash"]
         self.assertEqual(reverse_hex(reverse_hex(original)), original)
@@ -175,13 +207,12 @@ class TestReverseHex(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Version field of block 1777: job value -> header value.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_version(self):
         self.assertEqual(reverse_hex(vectors.JOB_VERSION), "00000020")
-
-
 
 
 
@@ -193,10 +224,15 @@ class TestReverseHex(unittest.TestCase):
 class TestReverseHex4bChunks(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Word-swapping the wire-format prevhash of block 1777 must
     # give the prevhash bytes inside the accepted header.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_prevhash_to_header_form(self):
         header_prevhash = vectors.HEADER_HEX[8:8+64]
         self.assertEqual(
@@ -209,12 +245,17 @@ class TestReverseHex4bChunks(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Applying the word swap twice must be the identity.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_round_trip(self):
         original = vectors.JOB_PREVHASH_WIRE
         self.assertEqual(reverse_hex_4b_chunks(reverse_hex_4b_chunks(original)), original)
+
+
+
+
 
 
 

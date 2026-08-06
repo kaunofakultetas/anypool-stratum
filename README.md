@@ -1,8 +1,8 @@
 # AnyPool - Stratum Mining Pool Server
 
-A Stratum protocol to Full Node RPC adapter for mining Bitcoin-family coins (SHA256d and Scrypt).
+A Stratum protocol to Full Node RPC adapter for mining Bitcoin-family coins (SHA256d and Scrypt) and CryptoNote coins (CryptoNight).
 
-![Coins](https://img.shields.io/badge/Coins-BTC_|_LTC_|_DOGE_|_KNF-green.svg)
+![Coins](https://img.shields.io/badge/Coins-BTC_|_LTC_|_DOGE_|_KNF_|_LTL-green.svg)
 
 
 <img height="500" alt="Screenshot 2025-08-28 at 12 17 18" src="https://github.com/user-attachments/assets/11074d46-6a85-4043-a016-092d1daac4be" /> <img height="500" alt="Screenshot 2025-08-28 at 12 19 23" src="https://github.com/user-attachments/assets/6ab2d8f1-f436-400d-a9e4-f6ead9e69dee" />
@@ -22,6 +22,27 @@ A Stratum protocol to Full Node RPC adapter for mining Bitcoin-family coins (SHA
 | `LTC` (Litecoin) | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
 | `KNF` (KnfCoin)  | mainnet, testnet | Scrypt | bech32 (native segwit) | SegWit + MWEB |
 | `DOGE` (Dogecoin) | mainnet, testnet | Scrypt | base58 (legacy P2PKH) | solo mining (no AuxPoW), validated on testnet 2026-07-14 |
+| `LTL` (Bitlitas) | mainnet, testnet | CryptoNight (cn/0) | CryptoNote base58 | CryptoNote family: XMRig-style login/job/submit stratum, validated against the live chain 2026-08-05 |
+
+**Two coin families, two stratum dialects.** Bitcoin-family coins speak
+classic stratum v1 (`mining.subscribe`/`notify`/`submit` — cgminer, ASICs);
+CryptoNote coins speak the `login`/`job`/`submit` dialect (XMRig). The
+family is picked automatically from `COIN` at startup. For CryptoNote
+coins `REWARD_ADDR` is passed to the daemon, which builds the coinbase
+itself — the whole block reward goes to that address (solo-style), and
+`RPC_USER`/`RPC_PASS` are ignored (Monero-era daemons run without RPC auth).
+
+**Per-connection difficulty (CryptoNote).** A miner can request its own
+difficulty instead of `POOL_DIFFICULTY` — either in the login
+(`workername+25000`) or the password (`d=25000`), the conventions XMRig
+users expect. Requests are clamped to sane bounds (and to the network
+difficulty when `POLL_DIFF_DROPPER` is on), so one pool port can serve
+a laptop CPU and a rented rig at the same time:
+
+```bash
+xmrig -o pool:3333 -a cn/0 -u rig1+250000 -p x     # big rig
+xmrig -o pool:3333 -a cn/0 -u laptop -p d=2000     # small CPU
+```
 
 **Difficulty units differ per algorithm.** `POOL_DIFFICULTY` is interpreted
 against the coin's difficulty-1 target: for Scrypt coins one diff-1 share

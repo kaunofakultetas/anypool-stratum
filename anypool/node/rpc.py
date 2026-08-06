@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Full Node RPC Client
 #
 #  The only place in the codebase that talks HTTP. A thin
@@ -12,17 +12,20 @@
 #                                  network
 #
 #  One aiohttp session is created lazily on the first call
-#  and reused for the lifetime of the process — the previous
-#  implementation opened a new session per call, which is
-#  wasteful when polling every few seconds.
+#  and reused for the lifetime of the process — opening a
+#  fresh session per call would burn a TCP+auth handshake on
+#  every poll, several times a second.
 #
 #  Every call carries a timeout (default 10s) so a hung node
 #  can never silently freeze the job refresh loop. Longpoll
 #  calls override it, since blocking is their whole point.
 #
 #  Used by:
-#    - stratum/server.py — StratumServer owns one NodeRPC instance
-# -----------------------------------------------------------
+#    - families/bitcoin/server.py — StratumServer owns one
+#      NodeRPC instance
+#    - families/bitcoin/runner.py — longpoll + shutdown
+############################################################
+
 
 from typing import Any, List, Optional
 
@@ -38,19 +41,28 @@ DEFAULT_TIMEOUT = 10.0
 
 
 
+
+
+
+
 class NodeRPC:
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # __init__
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Stores credentials from config. The session is not created
     # here because aiohttp needs a running event loop.
     #
     # Used by:
-    #   - stratum/server.py — StratumServer.__init__()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — StratumServer.__init__()
+    ############################################################
+
     def __init__(self):
         self.url = config.RPC_URL
         self.auth = aiohttp.BasicAuth(config.RPC_USER, config.RPC_PASS)
@@ -61,9 +73,9 @@ class NodeRPC:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # call
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Performs one JSON-RPC call and returns its "result" field.
     # Raises on any error the node reports (and on timeout), so
@@ -74,9 +86,10 @@ class NodeRPC:
     # MEANT to hang until the chain tip moves.
     #
     # Used by:
-    #   - stratum/server.py — create_job() and _submit_block()
-    #   - main.py           — longpoll_loop()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — create_job() and _submit_block()
+    #   - families/bitcoin/runner.py — longpoll_loop()
+    ############################################################
+
     async def call(self, method: str, params: List = None, timeout: Optional[float] = DEFAULT_TIMEOUT) -> Any:
         if params is None:
             params = []
@@ -110,15 +123,16 @@ class NodeRPC:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # close
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Graceful shutdown of the shared HTTP session.
     #
     # Used by:
-    #   - main.py — on server shutdown
-    # -----------------------------------------------------------
+    #   - families/bitcoin/runner.py — run() teardown
+    ############################################################
+
     async def close(self) -> None:
         if self.session and not self.session.closed:
             await self.session.close()

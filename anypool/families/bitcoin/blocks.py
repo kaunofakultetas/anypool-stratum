@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Block Assembly
 #
 #  Turns a solved share into the full serialized block that
@@ -16,28 +16,34 @@
 #  that is why jobs carry both coinb1/coinb2 variants.
 #
 #  Used by:
-#    - stratum/server.py — _submit_block()
-# -----------------------------------------------------------
+#    - families/bitcoin/server.py — _submit_block()
+############################################################
+
 
 from typing import Dict
 
-from anypool.mining.coinbase import to_varint
+from anypool.families.bitcoin.coinbase import to_varint
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # assemble_block
-# -----------------------------------------------------------
+############################################################
 #
 # Concatenates the final block hex for submission. The
 # header must come from shares.build_header() for the same
 # extranonce/ntime/nonce values, so header and body are
 # guaranteed to describe the same coinbase.
 #
-# The transaction count uses a proper varint (the previous
-# implementation used a single byte, which would have
-# produced corrupt blocks with more than 252 transactions).
+# The transaction count MUST be a real varint, not a single
+# byte — one byte only encodes counts up to 252 and would
+# produce a corrupt block the first time a template carries
+# more transactions than that.
 #
 # The MWEB tail (marker byte + optional extension data) is
 # Litecoin-family serialization and is only appended when the
@@ -45,8 +51,9 @@ from anypool.mining.coinbase import to_varint
 # Dogecoin that extra byte would make every block malformed.
 #
 # Used by:
-#   - stratum/server.py — _submit_block()
-# -----------------------------------------------------------
+#   - families/bitcoin/server.py — _submit_block()
+############################################################
+
 def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: str,
                    has_mweb: bool) -> str:
 

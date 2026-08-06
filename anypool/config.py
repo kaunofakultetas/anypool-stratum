@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Pool Configuration
 #
 #  Every knob of the pool lives here and nowhere else. All
@@ -17,23 +17,36 @@
 #  Used by:
 #    - main.py       — validate() on startup
 #    - every module  — reads config attributes
-# -----------------------------------------------------------
+############################################################
+
 
 import os
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # Coin selection
-# -----------------------------------------------------------
+############################################################
+
 COIN = os.getenv("COIN", "LTC")
 COIN_NETWORK = os.getenv("COIN_NETWORK", "testnet")
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # Full node RPC endpoint
-# -----------------------------------------------------------
+############################################################
+
 RPC_HOST = os.getenv("RPC_HOST", "127.0.0.1")
 RPC_PORT = int(os.getenv("RPC_PORT", "19332"))
 RPC_USER = os.getenv("RPC_USER", "admin")
@@ -41,16 +54,30 @@ RPC_PASS = os.getenv("RPC_PASS", "admin")
 RPC_URL = f"http://{RPC_HOST}:{RPC_PORT}"
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # Coinbase transaction
-# -----------------------------------------------------------
+############################################################
+
 REWARD_ADDR = os.getenv("REWARD_ADDR")
 COINBASE_MESSAGE = os.getenv("COINBASE_MESSAGE", "/AnyPool by VU Kaunas faculty/")
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # Pool settings
-# -----------------------------------------------------------
+############################################################
+
 STRATUM_PORT = int(os.getenv("STRATUM_PORT", "3333"))
 POOL_DIFFICULTY = int(os.getenv("POOL_DIFFICULTY", "2048"))
 
@@ -59,17 +86,28 @@ POOL_DIFFICULTY = int(os.getenv("POOL_DIFFICULTY", "2048"))
 POLL_DIFF_DROPPER = os.getenv("POLL_DIFF_DROPPER", "false").lower() == "true"
 
 
-# -----------------------------------------------------------
+
+
+
+
+
+
+############################################################
 # Debugging (prints verbose boxed panels for every share/job)
-# -----------------------------------------------------------
+############################################################
+
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # validate
-# -----------------------------------------------------------
+############################################################
 #
 # Called once from main() before anything else starts. Checks
 # that the selected coin/network exists in the coin registry
@@ -82,7 +120,8 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 #
 # Used by:
 #   - main.py — startup
-# -----------------------------------------------------------
+############################################################
+
 def validate() -> None:
     from anypool import coins
 
@@ -97,9 +136,10 @@ def validate() -> None:
         raise SystemExit("[CONFIG] REWARD_ADDR environment variable is required (address for block rewards)")
 
     # Full decode (checksum and all) through the coin's address
-    # scheme — the exact same code path the coinbase builder uses,
-    # so an address that passes here cannot fail later.
+    # scheme — the exact same code path used later (coinbase
+    # builder / daemon template request), so an address that
+    # passes here cannot fail deeper in.
     try:
-        coin.address_scheme.payout_script(REWARD_ADDR, COIN_NETWORK)
+        coin.address_scheme.validate_address(REWARD_ADDR, COIN_NETWORK)
     except ValueError as e:
         raise SystemExit(f"[CONFIG] REWARD_ADDR '{REWARD_ADDR}' is not a valid {COIN} {COIN_NETWORK} address: {e}")

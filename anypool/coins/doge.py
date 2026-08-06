@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Coin — DOGE (Dogecoin)
 #
 #  An OLDER Bitcoin Core fork: Scrypt PoW like Litecoin, but
@@ -20,7 +20,8 @@
 #
 #  Used by:
 #    - coins/__init__.py — registered in the coin registry
-# -----------------------------------------------------------
+############################################################
+
 
 from anypool.coins.address import Base58P2PKH
 from anypool.coins.base import CoinDefinition

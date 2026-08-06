@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Merkle Tree
 #
 #  The two halves of the stratum merkle dance:
@@ -16,13 +16,16 @@
 #
 #  IMPORTANT: all hashes in and out of this module are raw
 #  double-SHA256 bytes rendered as hex — NO endianness
-#  conversion happens here. Getting this wrong was the
-#  hardest bug in this project; keep it that way.
+#  conversion happens here. Mixing byte orders inside the
+#  tree is the classic way a pool earns "bad-txnmrklroot"
+#  rejects; every flip belongs at the module boundary
+#  (jobs.py / shares.py), so keep this module conversion-free.
 #
 #  Used by:
-#    - mining/jobs.py   — branch calculation at job creation
-#    - mining/shares.py — root recomputation at share validation
-# -----------------------------------------------------------
+#    - families/bitcoin/jobs.py   — branch calculation at job creation
+#    - families/bitcoin/shares.py — root recomputation at share validation
+############################################################
+
 
 from typing import List
 
@@ -31,9 +34,13 @@ from anypool.crypto.hashing import sha256d
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # calculate_merkle_branch
-# -----------------------------------------------------------
+############################################################
 #
 # Given all transaction hashes of the block (coinbase first)
 # and the index of the tx to prove, returns the list of
@@ -44,8 +51,9 @@ from anypool.crypto.hashing import sha256d
 # next level, halve the index, repeat until one node is left.
 #
 # Used by:
-#   - mining/jobs.py — build_job() proves the coinbase (index 0)
-# -----------------------------------------------------------
+#   - families/bitcoin/jobs.py — build_job() proves the coinbase (index 0)
+############################################################
+
 def calculate_merkle_branch(tx_hashes: List[str], index_to_prove: int) -> List[str]:
     if not tx_hashes:
         return []
@@ -84,11 +92,9 @@ def calculate_merkle_branch(tx_hashes: List[str], index_to_prove: int) -> List[s
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # calculate_merkle_root_from_branch
-# -----------------------------------------------------------
+############################################################
 #
 # Folds a leaf hash through its merkle branch to reproduce
 # the root. The index parity at each level decides whether
@@ -98,8 +104,9 @@ def calculate_merkle_branch(tx_hashes: List[str], index_to_prove: int) -> List[s
 # it can be dropped straight into the 80-byte block header.
 #
 # Used by:
-#   - mining/shares.py — build_header() during share validation
-# -----------------------------------------------------------
+#   - families/bitcoin/shares.py — build_header() during share validation
+############################################################
+
 def calculate_merkle_root_from_branch(leaf_hex: str, branch: List[str], index: int) -> str:
     # Start with leaf as raw bytes (NO endianness conversion for hashing)
     current = bytes.fromhex(leaf_hex)

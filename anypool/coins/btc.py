@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Coin — BTC (Bitcoin)
 #
 #  The original. SHA256d PoW — the PoW hash IS the block
@@ -24,7 +24,8 @@
 #
 #  Used by:
 #    - coins/__init__.py — registered in the coin registry
-# -----------------------------------------------------------
+############################################################
+
 
 from anypool.coins.address import Bech32P2WPKH
 from anypool.coins.base import CoinDefinition

@@ -1,19 +1,24 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Coinbase Builder
 #
-#  Covers anypool/coinbase.py. The central assertion:
+#  Covers families/bitcoin/coinbase.py. The central assertion:
 #  build_coinbase_parts() fed with the block 1777 template
 #  must reproduce, byte for byte, the coinb1/coinb2 halves
 #  the pool sent to the ASIC that mined the accepted block.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
-from anypool.mining.coinbase import bip34_height_push, build_coinbase_parts, to_varint
+from anypool.families.bitcoin.coinbase import bip34_height_push, build_coinbase_parts, to_varint
 from tests import vectors
+
+
+
+
 
 
 
@@ -21,9 +26,14 @@ from tests import vectors
 class TestToVarint(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # All four encoding ranges of the Bitcoin varint.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_encoding_ranges(self):
         self.assertEqual(to_varint(0), "00")
         self.assertEqual(to_varint(252), "fc")
@@ -39,15 +49,18 @@ class TestToVarint(unittest.TestCase):
 
 
 
-
-
 class TestBip34HeightPush(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Block 1777's height push, as seen at the end of the real
     # coinb1: length 0x02, then 0x6f1 little-endian = "f106".
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_height(self):
         self.assertEqual(bip34_height_push(1777).hex(), "02f106")
 
@@ -56,10 +69,11 @@ class TestBip34HeightPush(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # CScriptNum corner cases: zero, and the sign-bit padding
     # byte when the top byte has its high bit set.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_corner_cases(self):
         self.assertEqual(bip34_height_push(0), b"\x00")
         self.assertEqual(bip34_height_push(1).hex(), "0101")
@@ -75,15 +89,18 @@ class TestBip34HeightPush(unittest.TestCase):
 
 
 
-
-
 class TestBuildCoinbaseParts(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Byte-for-byte reproduction of the coinbase halves that
     # built KNF block 1777 (both txid and witness variants).
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_parts(self):
         parts = build_coinbase_parts(vectors.TEMPLATE)
 
@@ -103,10 +120,11 @@ class TestBuildCoinbaseParts(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Without a witness commitment in the template, the txid and
     # full serializations must be identical (non-segwit block).
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_no_witness_template(self):
         template = dict(vectors.TEMPLATE)
         del template["default_witness_commitment"]
@@ -115,6 +133,10 @@ class TestBuildCoinbaseParts(unittest.TestCase):
 
         self.assertEqual(parts["coinb1_txid"], parts["coinb1_full"])
         self.assertEqual(parts["coinb2_txid"], parts["coinb2_full"])
+
+
+
+
 
 
 

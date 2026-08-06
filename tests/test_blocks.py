@@ -1,20 +1,25 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Tests — Block Assembly
 #
-#  Covers anypool/blocks.py: the serialized block layout
-#  around a solved header, and the varint transaction count
-#  (which the pre-refactor code got wrong for blocks with
-#  more than 252 transactions).
+#  Covers families/bitcoin/blocks.py: the serialized block
+#  layout around a solved header, and the varint transaction
+#  count — the field a naive single-byte count corrupts for
+#  blocks with more than 252 transactions.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
-# -----------------------------------------------------------
+############################################################
+
 
 import unittest
 
-from anypool.mining.blocks import assemble_block
-from anypool.mining.jobs import build_job
+from anypool.families.bitcoin.blocks import assemble_block
+from anypool.families.bitcoin.jobs import build_job
 from tests import vectors
+
+
+
+
 
 
 
@@ -22,10 +27,15 @@ from tests import vectors
 class TestAssembleBlock(unittest.TestCase):
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # Block 1777 layout: header + tx count 01 + full (witness)
     # coinbase with the miner's extranonces + MWEB marker.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_block_1777_layout(self):
         job = build_job(vectors.TEMPLATE, "00000001")
 
@@ -43,11 +53,12 @@ class TestAssembleBlock(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # For a coin WITHOUT MWEB (Dogecoin-style old fork) the
     # block must end right after the last transaction — the
     # Litecoin-family marker byte would corrupt it.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_no_mweb_block_has_no_tail(self):
         job = build_job(vectors.TEMPLATE, "00000001")
 
@@ -65,10 +76,11 @@ class TestAssembleBlock(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Template transactions must be appended verbatim, and the
     # tx count must include the coinbase.
-    # -----------------------------------------------------------
+    ############################################################
+
     def test_transactions_appended(self):
         template = dict(vectors.TEMPLATE)
         template["transactions"] = [
@@ -89,10 +101,12 @@ class TestAssembleBlock(unittest.TestCase):
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # Above 252 transactions the count must switch to the "fd"
-    # varint form — the bug the old single-byte code had.
-    # -----------------------------------------------------------
+    # varint form — a single count byte would serialize a
+    # corrupt block here.
+    ############################################################
+
     def test_varint_tx_count_above_252(self):
         template = dict(vectors.TEMPLATE)
         template["transactions"] = [{"txid": "cc" * 32, "data": "00"} for _ in range(300)]
@@ -104,6 +118,10 @@ class TestAssembleBlock(unittest.TestCase):
         tx_count_pos = len(vectors.HEADER_HEX)
         # 301 transactions -> varint fd2d01 (0x012d little-endian)
         self.assertEqual(block_hex[tx_count_pos:tx_count_pos+6], "fd2d01")
+
+
+
+
 
 
 

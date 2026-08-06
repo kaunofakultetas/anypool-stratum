@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Stratum Error Codes
 #
 #  The standard stratum v1 share-rejection error tuples,
@@ -11,9 +11,9 @@
 #  WHY shares are rejected without access to the pool logs.
 #
 #  Used by:
-#    - stratum/server.py     — process_share() verdicts
-#    - stratum/connection.py — handle_submit() early rejects
-# -----------------------------------------------------------
+#    - families/bitcoin/server.py     — process_share() verdicts
+#    - families/bitcoin/connection.py — handle_submit() early rejects
+############################################################
 
 
 ERROR_OTHER = [20, "Other/Unknown", None]

@@ -1,17 +1,17 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Share Validation
 #
 #  Rebuilds what the miner claims to have hashed and checks
 #  it. The heart of it is build_header(): given a job and the
-#  four values the miner chose (extranonce2, ntime, nonce —
+#  values the miner chose (extranonce2, ntime, nonce —
 #  extranonce1 was assigned by us), it reconstructs the exact
-#  80-byte block header and its Scrypt PoW hash.
+#  80-byte block header and its PoW hash.
 #
 #  This ONE function is used both to validate shares and to
 #  build the header of a block we submit to the network — so
 #  a share we accept as a block is guaranteed to serialize to
-#  the same header we submit. (Previously the logic existed
-#  twice and could drift apart.)
+#  the same header we submit. Keep it that way: a second
+#  header-assembly path could silently drift from this one.
 #
 #  Endianness cheat-sheet for the header fields, going from
 #  the stratum job values to serialized header bytes:
@@ -28,9 +28,10 @@
 #  supporting a non-Scrypt coin needs no change in this file.
 #
 #  Used by:
-#    - stratum/server.py     — process_share() + _submit_block()
-#    - stratum/connection.py — validate_share_params() on submit
-# -----------------------------------------------------------
+#    - families/bitcoin/server.py     — process_share() + _submit_block()
+#    - families/bitcoin/connection.py — validate_share_params() on submit
+############################################################
+
 
 from typing import Dict, List, Tuple
 
@@ -48,9 +49,13 @@ NTIME_BACKWARD_SLACK = 600
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # validate_share_params
-# -----------------------------------------------------------
+############################################################
 #
 # Sanity check of a raw mining.submit parameter list before
 # anything is done with it: 5 entries (or 6 when the miner
@@ -64,8 +69,9 @@ NTIME_BACKWARD_SLACK = 600
 #   [worker_name, job_id, extra_nonce2, ntime, nonce, version_bits]
 #
 # Used by:
-#   - stratum/connection.py — handle_submit()
-# -----------------------------------------------------------
+#   - families/bitcoin/connection.py — handle_submit()
+############################################################
+
 def validate_share_params(params: List) -> bool:
     if len(params) not in (5, 6):
         return False
@@ -108,11 +114,9 @@ def validate_share_params(params: List) -> bool:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # ntime_within_range
-# -----------------------------------------------------------
+############################################################
 #
 # True when the miner's ntime stays inside the allowed window
 # around the job's ntime. Miners legitimately "roll" ntime a
@@ -121,8 +125,9 @@ def validate_share_params(params: List) -> bool:
 # never accept in a real block.
 #
 # Used by:
-#   - stratum/server.py — process_share()
-# -----------------------------------------------------------
+#   - families/bitcoin/server.py — process_share()
+############################################################
+
 def ntime_within_range(job_ntime_hex: str, ntime_hex: str) -> bool:
     job_ntime = int(job_ntime_hex, 16)
     ntime = int(ntime_hex, 16)
@@ -135,11 +140,9 @@ def ntime_within_range(job_ntime_hex: str, ntime_hex: str) -> bool:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # version_bits_allowed
-# -----------------------------------------------------------
+############################################################
 #
 # True when the version bits a miner submitted stay inside
 # the version-rolling mask negotiated on its connection. A
@@ -148,17 +151,22 @@ def ntime_within_range(job_ntime_hex: str, ntime_hex: str) -> bool:
 # unchanged.
 #
 # Used by:
-#   - stratum/connection.py — handle_submit()
-# -----------------------------------------------------------
+#   - families/bitcoin/connection.py — handle_submit()
+############################################################
+
 def version_bits_allowed(version_bits_hex: str, negotiated_mask: int) -> bool:
     return (int(version_bits_hex, 16) & ~negotiated_mask) == 0
 
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # rolled_version
-# -----------------------------------------------------------
+############################################################
 #
 # Applies BIP310 version rolling: the bits inside the mask
 # are REPLACED by the miner's bits, everything outside the
@@ -167,8 +175,9 @@ def version_bits_allowed(version_bits_hex: str, negotiated_mask: int) -> bool:
 # miners go through the same code path.
 #
 # Used by:
-#   - mining/shares.py — build_header()
-# -----------------------------------------------------------
+#   - build_header() (below)
+############################################################
+
 def rolled_version(job_version_hex: str, version_bits_hex: str, mask: int) -> str:
     version = int(job_version_hex, 16)
     bits = int(version_bits_hex, 16)
@@ -181,11 +190,9 @@ def rolled_version(job_version_hex: str, version_bits_hex: str, mask: int) -> st
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # build_header
-# -----------------------------------------------------------
+############################################################
 #
 # Reconstructs the 80-byte block header a miner hashed for a
 # given job + nonce combination, in four steps:
@@ -208,13 +215,14 @@ def rolled_version(job_version_hex: str, version_bits_hex: str, mask: int) -> st
 # the header was built during validation or block submission.
 #
 # Used by:
-#   - stratum/server.py — process_share() and _submit_block()
-# -----------------------------------------------------------
+#   - families/bitcoin/server.py — process_share() and _submit_block()
+############################################################
+
 def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
                  ntime: str, nonce: str, context: str = "validate_share",
                  version_bits: str = "00000000") -> Tuple[str, str, bytes]:
-
-    # Step 1: Reassemble the coinbase tx and hash it into its txid
+    # STEP 1: reassemble the coinbase tx and hash it into its txid
+    # ============================================================
     coinbase_txid_hex = job["coinb1"] + extra_nonce1 + extra_nonce2 + job["coinb2"]
     coinbase_txid_le = sha256d(bytes.fromhex(coinbase_txid_hex)).hex()
     coinbase_txid_be = reverse_hex(coinbase_txid_le)  # For display purposes
@@ -230,7 +238,8 @@ def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
     ])
 
 
-    # Step 2: Fold the coinbase txid through the merkle branch
+    # STEP 2: fold the coinbase txid through the merkle branch
+    # ========================================================
     merkle_root_le = calculate_merkle_root_from_branch(
         coinbase_txid_le, job["merkle_branch"], 0
     )
@@ -243,9 +252,10 @@ def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
     ])
 
 
-    # Step 3: Convert every field into serialized header byte order.
+    # STEP 3: convert every field into serialized header byte order.
     # The version first gets the miner's version-rolling bits
     # applied (identity when bits are zero / coin declines rolling).
+    # ==============================================================
     version_hex = rolled_version(job["version"], version_bits,
                                  coins.active().version_rolling_mask)
     version_final = reverse_hex(version_hex)
@@ -256,7 +266,8 @@ def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,
     nonce_final = reverse_hex(nonce)
 
 
-    # Step 4: Concatenate into the 80-byte header and PoW-hash it
+    # STEP 4: concatenate into the 80-byte header and PoW-hash it
+    # ===========================================================
     header_hex = version_final + prevhash_final + merkle_final + ntime_final + nbits_final + nonce_final
     header_bytes = bytes.fromhex(header_hex)
     pow_hash_hex = coins.active().pow_hash(header_bytes)

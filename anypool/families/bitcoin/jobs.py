@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Mining Jobs
 #
 #  Everything about the unit of work a miner receives:
@@ -26,22 +26,23 @@
 #    template       — the raw getblocktemplate result
 #                     (needed later for block submission)
 #
-#  stratum/server.py additionally snapshots the difficulty
+#  families/bitcoin/server.py additionally snapshots the difficulty
 #  state the job was issued under (pool_difficulty,
 #  pool_target, network_difficulty, network_target), so a
 #  late share is judged against the difficulty the miner was
 #  actually given — not the state of a newer job.
 #
 #  Used by:
-#    - stratum/server.py — create_job(), process_share()
-# -----------------------------------------------------------
+#    - families/bitcoin/server.py — create_job(), process_share()
+############################################################
+
 
 from typing import Dict, Optional
 
 from anypool import display
 from anypool.crypto.hashing import reverse_hex, reverse_hex_4b_chunks, sha256d
 from anypool.crypto.merkle import calculate_merkle_branch
-from anypool.mining.coinbase import build_coinbase_parts
+from anypool.families.bitcoin.coinbase import build_coinbase_parts
 
 
 # How many historical jobs to keep around for late shares.
@@ -53,9 +54,13 @@ MAX_STORED_JOBS = 10
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # stratum_prevhash
-# -----------------------------------------------------------
+############################################################
 #
 # Converts the previous block hash from the big-endian form
 # getblocktemplate reports into the word-swapped form the
@@ -63,9 +68,11 @@ MAX_STORED_JOBS = 10
 # each 4-byte word flipped back.
 #
 # Used by:
-#   - mining/jobs.py    — build_job()
-#   - stratum/server.py — create_job() "did the tip move?" check
-# -----------------------------------------------------------
+#   - build_job() and JobManager.is_same_work() (below) —
+#     the latter is create_job()'s "did the tip move?" check
+#   - tests/test_server.py — expected follow-up job fields
+############################################################
+
 def stratum_prevhash(prevhash_be: str) -> str:
     prevhash_le = reverse_hex(prevhash_be)
     return reverse_hex_4b_chunks(prevhash_le)
@@ -77,11 +84,9 @@ def stratum_prevhash(prevhash_be: str) -> str:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # build_job
-# -----------------------------------------------------------
+############################################################
 #
 # Assembles one complete mining job from a template:
 #
@@ -94,20 +99,22 @@ def stratum_prevhash(prevhash_be: str) -> str:
 #      identical for every miner regardless of extranonce.
 #
 # Used by:
-#   - stratum/server.py — create_job()
-# -----------------------------------------------------------
-def build_job(template: Dict, job_id: str) -> Dict:
+#   - families/bitcoin/server.py — create_job()
+############################################################
 
-    # Step 1: Field conversions for the stratum wire format
+def build_job(template: Dict, job_id: str) -> Dict:
+    # STEP 1: field conversions for the stratum wire format
+    # =====================================================
     prevhash_final = stratum_prevhash(template["previousblockhash"])
     version_be = f"{template['version']:08x}"
     nbits_be = f"{int(template['bits'], 16):08x}"
     ntime_be = f"{template['curtime']:08x}"
 
 
-    # Step 2: All template transactions (txids as reported, flipped
+    # STEP 2: all template transactions (txids as reported, flipped
     # to LE). Daemons older than Bitcoin Core 0.13 have no "txid"
     # field — for them "hash" is the txid (no segwit, so identical).
+    # ==============================================================
     template_txs = template.get("transactions", [])
     template_txids_be = [t.get("txid") or t["hash"] for t in template_txs]
     template_txids_le = [bytes.fromhex(txid)[::-1].hex() for txid in template_txids_be]
@@ -117,9 +124,10 @@ def build_job(template: Dict, job_id: str) -> Dict:
     ])
 
 
-    # Step 3: Coinbase halves + merkle branch.
-    # The placeholder extranonce only fills the coinbase for hashing
-    # position 0 — the resulting BRANCH does not depend on it.
+    # STEP 3: coinbase halves + merkle branch. The placeholder
+    # extranonce only fills the coinbase for hashing position 0
+    # — the resulting BRANCH does not depend on it.
+    # =========================================================
     coinbase_parts = build_coinbase_parts(template)
     placeholder_extranonce1 = "00000000"
     placeholder_coinbase_hex = coinbase_parts["coinb1_txid"] + placeholder_extranonce1 + ("00" * 4) + coinbase_parts["coinb2_txid"]
@@ -135,7 +143,8 @@ def build_job(template: Dict, job_id: str) -> Dict:
     ], color="red")
 
 
-    # Step 4: The job dict itself
+    # STEP 4: the job dict itself
+    # ===========================
     return {
         "job_id": job_id,
         "prevhash": prevhash_final,
@@ -164,21 +173,24 @@ def build_job(template: Dict, job_id: str) -> Dict:
 
 
 
-
-
 class JobManager:
 
 
-    # -----------------------------------------------------------
+
+
+
+
+    ############################################################
     # __init__
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Starts with an empty job store; job ids are a simple
     # incrementing counter rendered as 8 hex chars.
     #
     # Used by:
-    #   - stratum/server.py — StratumServer.__init__()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — StratumServer.__init__()
+    ############################################################
+
     def __init__(self):
         self.jobs: Dict[str, Dict] = {}
         self.current_job: Optional[Dict] = None
@@ -189,15 +201,16 @@ class JobManager:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # next_job_id
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Hands out the next unique job id ("00000001", ...).
     #
     # Used by:
-    #   - stratum/server.py — create_job()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — create_job()
+    ############################################################
+
     def next_job_id(self) -> str:
         self.job_seq += 1
         return f"{self.job_seq:08x}"
@@ -207,9 +220,9 @@ class JobManager:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # is_same_work
-    # -----------------------------------------------------------
+    ############################################################
     #
     # True when a freshly fetched template describes the work
     # we are already mining: same chain tip, same MWEB data,
@@ -218,8 +231,9 @@ class JobManager:
     # work.
     #
     # Used by:
-    #   - stratum/server.py — create_job()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — create_job()
+    ############################################################
+
     def is_same_work(self, template: Dict, current_network_target: Optional[int]) -> bool:
         if self.current_job is None:
             return False
@@ -235,9 +249,9 @@ class JobManager:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # store
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Registers a new job as the current one and prunes the
     # oldest entries beyond MAX_STORED_JOBS. Old jobs are kept
@@ -246,8 +260,9 @@ class JobManager:
     # actually hashed.
     #
     # Used by:
-    #   - stratum/server.py — create_job()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — create_job()
+    ############################################################
+
     def store(self, job: Dict) -> None:
         self.jobs[job["job_id"]] = job
         self.current_job = job
@@ -261,16 +276,17 @@ class JobManager:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # get
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Looks a job up by id; None means the job is stale or
     # never existed and the share must be rejected.
     #
     # Used by:
-    #   - stratum/server.py — process_share()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — process_share()
+    ############################################################
+
     def get(self, job_id: str) -> Optional[Dict]:
         return self.jobs.get(job_id)
 
@@ -279,9 +295,9 @@ class JobManager:
 
 
 
-    # -----------------------------------------------------------
+    ############################################################
     # register_share
-    # -----------------------------------------------------------
+    ############################################################
     #
     # Duplicate-share guard. Returns True the FIRST time this
     # exact (extranonce1, extranonce2, ntime, nonce, version
@@ -292,8 +308,9 @@ class JobManager:
     # miner legitimately reuses a nonce under different bits.
     #
     # Used by:
-    #   - stratum/server.py — process_share()
-    # -----------------------------------------------------------
+    #   - families/bitcoin/server.py — process_share()
+    ############################################################
+
     def register_share(self, job: Dict, extra_nonce1: str, extra_nonce2: str,
                        ntime: str, nonce: str, version_bits: str = "00000000") -> bool:
         share_key = (extra_nonce1, extra_nonce2, ntime, nonce, version_bits)

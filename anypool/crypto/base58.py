@@ -1,4 +1,4 @@
-# -----------------------------------------------------------
+############################################################
 #  [*] Base58Check Address Decoding
 #
 #  The legacy address format of Bitcoin Core forks that
@@ -17,7 +17,8 @@
 #
 #  Used by:
 #    - coins/address.py — the Base58P2PKH address scheme
-# -----------------------------------------------------------
+############################################################
+
 
 from typing import Tuple
 
@@ -30,9 +31,13 @@ BASE58_INDEX = {c: i for i, c in enumerate(BASE58_ALPHABET)}
 
 
 
-# -----------------------------------------------------------
+
+
+
+
+############################################################
 # base58_decode
-# -----------------------------------------------------------
+############################################################
 #
 # Raw base58 -> bytes. The string is interpreted as one big
 # base-58 number; each leading '1' character encodes one
@@ -41,7 +46,8 @@ BASE58_INDEX = {c: i for i, c in enumerate(BASE58_ALPHABET)}
 #
 # Used by:
 #   - crypto/base58.py — base58check_decode()
-# -----------------------------------------------------------
+############################################################
+
 def base58_decode(s: str) -> bytes:
     num = 0
     for c in s:
@@ -62,11 +68,9 @@ def base58_decode(s: str) -> bytes:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # base58check_decode
-# -----------------------------------------------------------
+############################################################
 #
 # Validates the 4-byte double-SHA256 checksum and splits the
 # result into (version_byte, payload). Raises ValueError on
@@ -74,7 +78,8 @@ def base58_decode(s: str) -> bytes:
 #
 # Used by:
 #   - crypto/base58.py — p2pkh_script_for_address()
-# -----------------------------------------------------------
+############################################################
+
 def base58check_decode(addr: str) -> Tuple[int, bytes]:
     raw = base58_decode(addr.strip())
 
@@ -95,11 +100,9 @@ def base58check_decode(addr: str) -> Tuple[int, bytes]:
 
 
 
-
-
-# -----------------------------------------------------------
+############################################################
 # p2pkh_script_for_address
-# -----------------------------------------------------------
+############################################################
 #
 # The public entry point of this module: decodes a legacy
 # address, checks it belongs to the expected network (by its
@@ -114,7 +117,8 @@ def base58check_decode(addr: str) -> Tuple[int, bytes]:
 #
 # Used by:
 #   - coins/address.py — Base58P2PKH.payout_script()
-# -----------------------------------------------------------
+############################################################
+
 def p2pkh_script_for_address(addr: str, expected_version: int) -> str:
     version, pubkey_hash = base58check_decode(addr)
 
