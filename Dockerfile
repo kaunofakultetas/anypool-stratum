@@ -11,8 +11,7 @@ WORKDIR /app
 
 # Build dependencies
 RUN apk add --no-cache --virtual .build-deps \
-        gcc g++ musl-dev python3-dev openssl-dev linux-headers && \
-    apk del .build-deps
+        gcc g++ musl-dev python3-dev openssl-dev linux-headers
 
 
 # Python dependencies
@@ -20,7 +19,8 @@ RUN pip install --no-cache-dir      \
     "aiohttp==3.12.15"              \
     "scrypt==0.9.4"                 \
     "pyboxen==1.3.0"                \
-    "py-cryptonight==1.0.0"
+    "py-cryptonight==1.0.0"      && \
+    apk del .build-deps
 
 
 

@@ -55,6 +55,14 @@ from anypool.families.bitcoin.errors import (
 # history than any live share can still reference.
 MAX_SUBMITTED_PARENTS = 50
 
+# Re-issue the current job with a fresh ntime once it is this
+# old, even when the chain tip has not moved. Miners and rental
+# proxies judge a pool by the freshness of its work: a job whose
+# ntime drifts minutes into the past reads as a dead pool and
+# ASICs refuse to hash it. On a quiet chain (no blocks for
+# hours) the tip alone would never trigger a new job.
+JOB_NTIME_REFRESH_SECONDS = 30
+
 
 
 
@@ -186,7 +194,7 @@ class StratumServer(BasePoolServer):
     #   - families/bitcoin/runner.py — after the initial job
     ############################################################
 
-    async def broadcast_new_job(self) -> None:
+    async def broadcast_new_job(self, clean_jobs: bool = True) -> None:
         job = self.job_manager.current_job
         if not job or not self.connected_clients:
             return
@@ -197,7 +205,7 @@ class StratumServer(BasePoolServer):
 
         notification_params = [
             job["job_id"], job["prevhash"], job["coinb1"], job["coinb2"],
-            job["merkle_branch"], job["version"], job["nbits"], job["ntime"], True
+            job["merkle_branch"], job["version"], job["nbits"], job["ntime"], clean_jobs
         ]
 
         # Send sequentially so per-client failures can be caught
@@ -261,9 +269,15 @@ class StratumServer(BasePoolServer):
 
 
             # STEP 2: nothing changed? Keep the job miners are working on
+            # — but only while its ntime is still fresh. A stagnant tip
+            # must not freeze the job forever: miners treat old-ntime
+            # work as a dead pool (see JOB_NTIME_REFRESH_SECONDS).
             # ===========================================================
-            if self.job_manager.is_same_work(template, self.network_target):
-                return self.job_manager.current_job
+            same_work = self.job_manager.is_same_work(template, self.network_target)
+            if same_work:
+                job_ntime = int(self.job_manager.current_job["ntime"], 16)
+                if template["curtime"] - job_ntime < JOB_NTIME_REFRESH_SECONDS:
+                    return self.job_manager.current_job
 
 
             # STEP 3: refresh difficulty and target state
@@ -280,7 +294,8 @@ class StratumServer(BasePoolServer):
                     self.pool_difficulty = self.network_difficulty
                     self.pool_target = self.network_target
 
-            display.new_block_panel(template["height"] - 1, template["previousblockhash"])
+            if not same_work:
+                display.new_block_panel(template["height"] - 1, template["previousblockhash"])
 
 
             # STEP 4: build, store and broadcast the new job.
@@ -299,18 +314,23 @@ class StratumServer(BasePoolServer):
 
             if self.connected_clients:
                 print(f"[BROADCAST] BROADCASTING NEW JOB to {len(self.connected_clients)} clients...")
-                self._spawn(self.broadcast_new_job())
+                # Same tip, fresh ntime only: clean_jobs=False so miners
+                # keep their in-flight work instead of restarting.
+                self._spawn(self.broadcast_new_job(clean_jobs=not same_work))
 
-            display.job_created_panel(job, self.pool_difficulty, self.network_difficulty,
-                                      self.pool_target, self.network_target)
+            if same_work:
+                print(f"[REFRESH] Job {job['job_id']} re-issued with fresh ntime {job['ntime']} (same tip, height {job['height']})")
+            else:
+                display.job_created_panel(job, self.pool_difficulty, self.network_difficulty,
+                                          self.pool_target, self.network_target)
 
-            display.debug_box("DEBUG - StratumServer.create_job()", [
-                "Stored job: ".ljust(25) +          job["job_id"],
-                "Jobs in memory: ".ljust(25) +      str(len(self.job_manager.jobs)),
-                "Job keys: ".ljust(25) +            str(list(self.job_manager.jobs.keys())),
-                "Height: ".ljust(25) +              str(job["height"]),
-                "Template transactions: ".ljust(25) + str(len(template.get("transactions", []))),
-            ])
+                display.debug_box("DEBUG - StratumServer.create_job()", [
+                    "Stored job: ".ljust(25) +          job["job_id"],
+                    "Jobs in memory: ".ljust(25) +      str(len(self.job_manager.jobs)),
+                    "Job keys: ".ljust(25) +            str(list(self.job_manager.jobs.keys())),
+                    "Height: ".ljust(25) +              str(job["height"]),
+                    "Template transactions: ".ljust(25) + str(len(template.get("transactions", []))),
+                ])
 
             return job
 
@@ -408,8 +428,13 @@ class StratumServer(BasePoolServer):
             # difficulty, which must not affect this share's verdict.
             # ============================================================
             hash_int = int(result_hash, 16)
-            is_accepted = hash_int <= job["pool_target"]
-            is_block = is_accepted and hash_int <= job["network_target"]
+            # A block-grade hash is judged independently of the share
+            # target: when pool difficulty exceeds network difficulty a
+            # hash can solve a block while missing the share target, and
+            # it must still be submitted (and credited) — never dropped
+            # as a "low difficulty" share.
+            is_block = hash_int <= job["network_target"]
+            is_accepted = hash_int <= job["pool_target"] or is_block
 
             if is_accepted:
                 self.shares_accepted += 1
