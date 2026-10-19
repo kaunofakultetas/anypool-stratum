@@ -5,18 +5,26 @@
 #  TCP stream and speaks the line-delimited JSON-RPC dialect
 #  of the stratum v1 protocol:
 #
-#    mining.subscribe  — miner announces itself; we assign
-#                        its unique extranonce1 and send the
-#                        current difficulty + job
+#    mining.subscribe  — miner announces itself; we answer
+#                        with its unique extranonce1 and send
+#                        the current difficulty + job
+#    mining.configure  — BIP310 extension negotiation; only
+#                        version-rolling is ever granted
 #    mining.authorize  — miner names its worker
 #    mining.submit     — miner submits a share; forwarded to
 #                        StratumServer.process_share()
 #
+#  mining.extranonce.subscribe and mining.suggest_difficulty
+#  only get an acknowledgement; any other request is answered
+#  with a "not supported" error.
+#
 #  Framing and connection lifecycle live in the shared base
 #  (anypool/stratum/base.py) — this file is only the dialect:
 #  message dispatch and the mining.* handlers. All mining
-#  decisions (validation, targets, job state) belong to
-#  server.py.
+#  decisions (share judgment, targets, job state) belong to
+#  server.py; a submit is only turned away here when its
+#  params are malformed or its version bits leave the
+#  negotiated mask.
 #
 #  Used by:
 #    - families/bitcoin/runner.py — handle_client() is the
@@ -37,6 +45,25 @@ from anypool.stratum.base import BaseStratumConnection
 
 
 
+
+############################################################
+# StratumConnection
+############################################################
+#
+# One connected miner as the Bitcoin dialect sees it. The
+# shared base owns the socket, the read loop, the worker
+# name and the authorized flag; this class adds what
+# stratum v1 settles per connection: the subscription id,
+# the extranonce1 the server assigned (it makes this
+# miner's coinbase, and so its work, unique) and the
+# version-rolling mask agreed through mining.configure. It
+# keeps no mining state of its own — every share goes to
+# the server for its verdict.
+#
+# Used by:
+#   - handle_client() (bottom of this file) — one per
+#     accepted TCP connection
+############################################################
 
 class StratumConnection(BaseStratumConnection):
 
@@ -81,8 +108,12 @@ class StratumConnection(BaseStratumConnection):
     ############################################################
     #
     # Routes one parsed stratum message to its handler.
-    # Unknown methods are logged and ignored (miners send
-    # various optional extensions we don't need).
+    # mining.extranonce.subscribe and mining.suggest_difficulty
+    # get a plain acknowledgement; an unknown method is logged
+    # and, when it carries an id, answered with a "not
+    # supported" error, since an unanswered request makes
+    # many miners stall. A handler that raises is only
+    # logged — the connection carries on.
     #
     # Used by:
     #   - stratum/base.py — BaseStratumConnection.handle()
@@ -136,7 +167,8 @@ class StratumConnection(BaseStratumConnection):
     # The stratum handshake. Replies with the subscription
     # ids, this connection's extranonce1 and the extranonce2
     # size (4 bytes), then immediately pushes the current
-    # difficulty and job so the miner can start hashing
+    # difficulty and job — cutting the first job itself when
+    # none exists yet — so the miner can start hashing
     # without waiting for the next broadcast.
     #
     # Used by:
@@ -202,7 +234,9 @@ class StratumConnection(BaseStratumConnection):
     # the spec-correct way to make miners fall back to plain
     # stratum instead of stalling on a missing response.
     #
-    # Expected params: [[ext_name, ...], {"ext.param": value}]
+    # The params are the list of requested extension names,
+    # then an object of their parameters; a missing or
+    # unreadable version-rolling.mask counts as all 32 bits.
     #
     # Used by:
     #   - process_message() (above)
@@ -272,10 +306,9 @@ class StratumConnection(BaseStratumConnection):
     # stratum error tuple so the miner's own log shows WHY
     # (stale job, duplicate, low difficulty, ...).
     #
-    # Expected params:
-    #   [worker_name, job_id, extra_nonce2, ntime, nonce]
-    #   [worker_name, job_id, extra_nonce2, ntime, nonce,
-    #    version_bits]                     (BIP310 rolling)
+    # The params are the worker name, job id, extranonce2,
+    # ntime and nonce, with the BIP310 version-rolling bits as
+    # an optional sixth entry.
     #
     # Used by:
     #   - process_message() (above)
@@ -288,6 +321,8 @@ class StratumConnection(BaseStratumConnection):
             self.worker_name = params[0]
             self.authorized = True
 
+        # Only an empty params list gets here — any submit that
+        # names a worker was authorized just above
         if not self.authorized:
             await self.send_response(msg_id, False, ERROR_UNAUTHORIZED)
             return
@@ -334,7 +369,8 @@ class StratumConnection(BaseStratumConnection):
 # until disconnect.
 #
 # Used by:
-#   - families/bitcoin/runner.py — asyncio.start_server(...)
+#   - families/bitcoin/runner.py — run(), as the connection
+#     callback of the stratum listener
 ############################################################
 
 async def handle_client(reader, writer, server):

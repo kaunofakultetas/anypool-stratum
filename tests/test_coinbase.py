@@ -5,6 +5,8 @@
 #  build_coinbase_parts() fed with the block 1777 template
 #  must reproduce, byte for byte, the coinb1/coinb2 halves
 #  the pool sent to the ASIC that mined the accepted block.
+#  Around it, the two encoders the coinbase is written with:
+#  the Bitcoin varint and the BIP34 height push.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -23,6 +25,16 @@ from tests import vectors
 
 
 
+############################################################
+# TestToVarint
+############################################################
+#
+# to_varint(), the Bitcoin variable-length integer that
+# script lengths, output counts and a block's transaction
+# count are written with — each of its four widths, at the
+# boundaries where it switches.
+############################################################
+
 class TestToVarint(unittest.TestCase):
 
 
@@ -31,6 +43,9 @@ class TestToVarint(unittest.TestCase):
 
 
     ############################################################
+    # test_encoding_ranges
+    ############################################################
+    #
     # All four encoding ranges of the Bitcoin varint.
     ############################################################
 
@@ -49,6 +64,15 @@ class TestToVarint(unittest.TestCase):
 
 
 
+############################################################
+# TestBip34HeightPush
+############################################################
+#
+# bip34_height_push(), the push of the block height that
+# BIP34 makes the coinbase scriptSig open with: the real
+# block's push, and the CScriptNum encoding's corner cases.
+############################################################
+
 class TestBip34HeightPush(unittest.TestCase):
 
 
@@ -57,8 +81,12 @@ class TestBip34HeightPush(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_height
+    ############################################################
+    #
     # Block 1777's height push, as seen at the end of the real
-    # coinb1: length 0x02, then 0x6f1 little-endian = "f106".
+    # coinb1: a length byte of two, then the height in
+    # little-endian byte order.
     ############################################################
 
     def test_block_1777_height(self):
@@ -70,6 +98,9 @@ class TestBip34HeightPush(unittest.TestCase):
 
 
     ############################################################
+    # test_corner_cases
+    ############################################################
+    #
     # CScriptNum corner cases: zero, and the sign-bit padding
     # byte when the top byte has its high bit set.
     ############################################################
@@ -89,6 +120,15 @@ class TestBip34HeightPush(unittest.TestCase):
 
 
 
+############################################################
+# TestBuildCoinbaseParts
+############################################################
+#
+# build_coinbase_parts() against block 1777's real coinbase
+# in both serializations, and the two collapsing into one
+# when the template carries no witness commitment.
+############################################################
+
 class TestBuildCoinbaseParts(unittest.TestCase):
 
 
@@ -97,6 +137,9 @@ class TestBuildCoinbaseParts(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_parts
+    ############################################################
+    #
     # Byte-for-byte reproduction of the coinbase halves that
     # built KNF block 1777 (both txid and witness variants).
     ############################################################
@@ -121,6 +164,9 @@ class TestBuildCoinbaseParts(unittest.TestCase):
 
 
     ############################################################
+    # test_no_witness_template
+    ############################################################
+    #
     # Without a witness commitment in the template, the txid and
     # full serializations must be identical (non-segwit block).
     ############################################################

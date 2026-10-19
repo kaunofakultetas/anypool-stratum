@@ -4,22 +4,33 @@
 #
 #  A minimal real miner speaking the CryptoNote stratum
 #  dialect, used to prove the whole pool end to end against
-#  a LIVE daemon: login -> receive a personalized job ->
-#  CPU-brute nonces with actual CryptoNight -> submit the
-#  share -> expect {"status": "OK"} -> then deliberately
-#  submit a WRONG result and expect the "Invalid share"
-#  rejection.
+#  a LIVE daemon. It logs in, takes the personalized job the
+#  pool hands it, brute-forces nonces on the CPU with the
+#  real CryptoNight hash until one meets the job's target,
+#  submits that share and expects an OK status — then
+#  deliberately submits a WRONG result and expects it
+#  refused. The pool normally refuses it as an invalid
+#  share, but the script takes any error as the refusal.
 #
-#  Run it inside the stratum image (needs py-cryptonight), on
-#  the same docker network as the pool:
+#  Run it inside the stratum image (py-cryptonight lives
+#  there), on the same docker network as the pool, from the
+#  repo root as a module of the tests package — the way
+#  tests/integration_mweb_regtest.py is run. Run as a plain
+#  script by its path it cannot import the anypool package:
+#  Python puts the script's own folder, not the repo root, on
+#  the import path. It takes the pool's host and port (the
+#  loopback and 3333 when left out), then optionally a time
+#  budget in seconds (300 by default) and a difficulty to
+#  request for the connection through the password
+#  convention.
 #
-#    python tests/integration_cn_miner.py <host> <port> [seconds]
-#
-#  Exit code 0 = a share was accepted AND the bogus share was
-#  rejected. Anything else = failure.
+#  The exit code is 0 only when a share was accepted AND the
+#  bogus share was refused; anything else is a failure.
 #
 #  Used by:
-#    - manual/CI integration runs (not unittest discovery)
+#    - manual integration runs against a CryptoNote pool;
+#      unittest discovery never picks it up (its name does
+#      not start with test)
 ############################################################
 
 
@@ -90,8 +101,8 @@ def difficulty_from_compact_target(target_hex: str) -> int:
 #
 # The whole integration scenario in one pass: login, brute
 # a real share, submit it, then submit a deliberately wrong
-# result. Returns the process exit code (0 = pool accepted
-# the honest share AND rejected the lying one).
+# result. Returns the process exit code — zero only when the
+# pool accepted the honest share AND refused the lying one.
 #
 # Used by:
 #   - the __main__ guard below
@@ -163,6 +174,10 @@ def main():
                     print("[MINER] ✅ SHARE ACCEPTED by pool")
                     accepted = True
                 else:
+                    # Known weakness: the retry mines the SAME job from
+                    # nonce zero again, so it finds and resubmits the very
+                    # same nonce (now a duplicate, or still stale) — only a
+                    # job the pool pushes in between can lead to a new share
                     print(f"[MINER] share rejected: {reply.get('error')} (retrying)")
                 break
         if accepted:
@@ -178,6 +193,10 @@ def main():
     send({"id": 3, "jsonrpc": "2.0", "method": "submit",
           "params": {"id": session, "job_id": job["job_id"],
                      "nonce": "ffffffff", "result": "00" * 32}})
+
+    # Every frame before the answer is skipped — job pushes
+    # and leftovers alike; the explicit continue for a job
+    # push changes nothing
     while True:
         reply = read_line(sock_file)
         if reply.get("id") == 3:

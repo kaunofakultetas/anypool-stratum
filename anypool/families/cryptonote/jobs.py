@@ -14,7 +14,7 @@
 #
 #  CnJobManager owns:
 #
-#    - the current template (one per chain tip fetch)
+#    - the current template (replaced on every fetch)
 #    - every issued per-client job, so a submit can be
 #      validated against the EXACT bytes the miner hashed
 #    - per-job nonce sets for duplicate detection
@@ -25,12 +25,16 @@
 #    client          — the connection this job was issued to
 #    extranonce      — the 8 bytes written into reserved space
 #    template_blob   — full block blob WITH extranonce (bytes)
-#    hashing_blob    — the 76-byte blob the miner hashes (bytes)
-#    nonce_offset    — where the miner's nonce lands (39)
-#    height / prev_hash / seed of the template it came from
+#    hashing_blob    — the blob the miner hashes (bytes,
+#                      usually 76 of them)
+#    nonce_offset    — where the miner's nonce lands (39 on
+#                      this chain) — the same in both blobs
+#    height / prev_hash of the template it came from
 #    pool_difficulty / network_difficulty — snapshotted, so a
 #        late share is judged against the difficulty the
 #        miner was actually given
+#    target          — pool_difficulty as the compact 4-byte
+#                      target the miner is sent
 #    seen_nonces     — duplicate-share guard
 #
 #  Used by:
@@ -45,8 +49,12 @@ from anypool.families.cryptonote.blob import hashing_blob, parse_block, with_ext
 
 
 # How many issued jobs to keep. CryptoNote miners hold ONE
-# job at a time, so this only needs to cover clients * the
-# couple of jobs that can be in flight during a broadcast.
+# job at a time, so this only needs to cover every client
+# times the couple of jobs that can be in flight during a
+# broadcast — enough for about a hundred miners. Past 200
+# connected miners a single broadcast prunes jobs it handed
+# out moments earlier, and those miners' shares come back
+# as Invalid job id.
 MAX_STORED_JOBS = 200
 
 
@@ -55,6 +63,27 @@ MAX_STORED_JOBS = 200
 
 
 
+
+############################################################
+# CnJobManager
+############################################################
+#
+# The job store of a CryptoNote pool: the current template
+# and every per-client job cut from it, kept by job id so a
+# submit can be checked against the exact bytes its miner
+# hashed. Jobs are personalized when they are cut — each
+# carries its client's extranonce and a difficulty snapshot
+# — so the store holds one entry per job handed out, not
+# one per template, and prunes the oldest past
+# MAX_STORED_JOBS.
+#
+# Used by:
+#   - families/cryptonote/server.py — CnStratumServer owns
+#     the single instance: create_job() stores templates,
+#     process_share() looks jobs up
+#   - families/cryptonote/connection.py — job_payload() cuts
+#     every job through make_job()
+############################################################
 
 class CnJobManager:
 
@@ -88,7 +117,8 @@ class CnJobManager:
     # next_job_id
     ############################################################
     #
-    # Hands out the next unique job id ("00000001", ...).
+    # Hands out the next unique job id: the counter as 8 hex
+    # digits, starting from 1.
     #
     # Used by:
     #   - make_job() (below)
@@ -110,7 +140,11 @@ class CnJobManager:
     # Stores a freshly fetched block template (parsed once so
     # every per-client job derives from the same offsets).
     # Returns True when it describes NEW work — a different
-    # parent than the template miners are currently on.
+    # parent than the template miners are currently on. The
+    # template is replaced either way, so every job cut after
+    # a refresh carries the fresher transaction set; the
+    # return value only tells create_job() whether the
+    # parent moved.
     #
     # Used by:
     #   - families/cryptonote/server.py — create_job()
@@ -146,10 +180,12 @@ class CnJobManager:
     # Cuts one personalized job from the current template for
     # one client: write the client's extranonce into the
     # reserved space, derive the hashing blob, snapshot the
-    # difficulty state, store and return the job.
+    # difficulty state, store and return the job. Raises
+    # RuntimeError while no template has been stored yet.
     #
     # Used by:
-    #   - families/cryptonote/server.py — login pushes + broadcasts
+    #   - families/cryptonote/connection.py — job_payload(),
+    #     for the login reply, getjob and every pushed job
     ############################################################
 
     def make_job(self, client, extranonce: bytes, pool_difficulty: int) -> Dict:
@@ -210,7 +246,9 @@ class CnJobManager:
     ############################################################
     #
     # Duplicate-share guard: True the FIRST time this nonce is
-    # submitted for the job, False on every replay.
+    # submitted for the job, False on every replay. Nonces are
+    # compared lowercased — the same 4 bytes in other hex case
+    # are still a replay.
     #
     # Used by:
     #   - families/cryptonote/server.py — process_share()

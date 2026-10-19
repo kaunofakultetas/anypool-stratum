@@ -1,9 +1,10 @@
 ############################################################
 #  [*] Full Node RPC Client
 #
-#  The only place in the codebase that talks HTTP. A thin
-#  JSON-RPC 1.0 client for the coin daemon (litecoind/knfd),
-#  used for:
+#  One of the two places in the codebase that talk HTTP —
+#  monero_rpc.py is its CryptoNote counterpart. A thin
+#  JSON-RPC 1.0 client for the Bitcoin-style coin daemon
+#  (litecoind/knfd), used for:
 #
 #    getblocktemplate            — poll for new work (every 5s)
 #    getblocktemplate (longpoll) — blocks until the chain tip
@@ -18,7 +19,7 @@
 #  One aiohttp session is created lazily on the first call
 #  and reused for the lifetime of the process — opening a
 #  fresh session per call would burn a TCP+auth handshake on
-#  every poll, several times a second.
+#  every single poll.
 #
 #  Every call carries a timeout (default 10s) so a hung node
 #  can never silently freeze the job refresh loop. Longpoll
@@ -35,7 +36,8 @@
 #    - families/bitcoin/server.py — StratumServer owns one
 #      NodeRPC instance
 #    - families/bitcoin/runner.py — longpoll + shutdown
-#    - families/bitcoin/mweb.py — deployment reads, peg-in
+#    - families/bitcoin/mweb.py — deployment reads, peg-in,
+#      and NodeRPCError for the peg-in's failure hints
 ############################################################
 
 
@@ -87,7 +89,8 @@ class NodeRPCError(Exception):
     ############################################################
     #
     # Keeps the whole error object, and its code and message
-    # when the node sent the usual {code, message} shape.
+    # when the node sent the usual object with both fields;
+    # anything else keeps no code and its text as the message.
     #
     # Used by:
     #   - NodeRPC.call (below)
@@ -105,6 +108,28 @@ class NodeRPCError(Exception):
 
 
 
+
+############################################################
+# NodeRPC
+############################################################
+#
+# The client of a Bitcoin-style daemon, one per pool
+# process: the node URL and basic-auth credentials from
+# config, and one aiohttp session opened on the first call
+# and reused by every call after it until close(). Every
+# question the Bitcoin family asks its node — templates,
+# block submission, the MWEB deployment watch and peg-in —
+# goes through the single call() below, so timeouts and
+# error handling are decided in one place.
+#
+# Used by:
+#   - families/bitcoin/server.py — StratumServer creates the
+#     instance and calls through it
+#   - families/bitcoin/runner.py — longpoll_loop() and the
+#     teardown in run(), through server.rpc
+#   - families/bitcoin/mweb.py — send_pegin() and MwebWatch
+#     are handed the instance
+############################################################
 
 class NodeRPC:
 
@@ -154,9 +179,10 @@ class NodeRPC:
     # MEANT to hang until the chain tip moves.
     #
     # Used by:
-    #   - families/bitcoin/server.py — create_job() and _submit_block()
+    #   - families/bitcoin/server.py — _fetch_template() and _submit_block()
     #   - families/bitcoin/runner.py — longpoll_loop()
-    #   - families/bitcoin/mweb.py — MwebWatch, send_pegin()
+    #   - families/bitcoin/mweb.py — MwebWatch.observe() and
+    #     MwebWatch.diagnose(), send_pegin()
     ############################################################
 
     async def call(self, method: str, params: Union[List, Dict, None] = None,

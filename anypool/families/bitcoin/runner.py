@@ -13,7 +13,8 @@
 #      to 5 seconds of hashing stale work
 #
 #  Used by:
-#    - main.py — via families.active().run()
+#    - main.py — main() runs run(), picked through
+#      families.active()
 ############################################################
 
 
@@ -41,10 +42,11 @@ JOB_REFRESH_INTERVAL = 5
 # Polls the node forever. create_job() itself decides whether
 # the template contains new work, so calling it every few
 # seconds is cheap — no new job is cut (and no broadcast is
-# sent) unless the chain tip actually moved.
+# sent) unless the work changed or the current job's ntime
+# has grown stale (JOB_NTIME_REFRESH_SECONDS in server.py).
 #
 # Used by:
-#   - runner.py — run()
+#   - run() (below)
 ############################################################
 
 async def job_refresh_loop(server: StratumServer):
@@ -71,21 +73,22 @@ async def job_refresh_loop(server: StratumServer):
 # milliseconds of a new block instead of waiting for the
 # next 5-second poll.
 #
-# IMPORTANT: the longpoll call uses timeout=None on purpose.
-# Bitcoin Core-style nodes never notice a client that gives
-# up on a longpoll — the abandoned request keeps occupying
-# one of the node's few RPC worker threads forever. A client
-# -side timeout therefore leaks one node thread per recycle
-# until the whole RPC work queue is saturated ("work queue
-# depth exceeded"). Letting the request hang indefinitely
-# means exactly ONE node thread is ever held by longpoll.
+# IMPORTANT: the longpoll call runs without any timeout, on
+# purpose. Bitcoin Core-style nodes never notice a client
+# that gives up on a longpoll — the abandoned request keeps
+# occupying one of the node's few RPC worker threads
+# forever. A client-side timeout therefore leaks one node
+# thread per recycle until the whole RPC work queue is
+# saturated ("work queue depth exceeded"). Letting the
+# request hang indefinitely means exactly ONE node thread is
+# ever held by longpoll.
 #
 # Any error (node restart, dropped connection, no job yet)
 # just waits a poll interval and retries — the
 # job_refresh_loop keeps the pool alive regardless.
 #
 # Used by:
-#   - runner.py — run()
+#   - run() (below)
 ############################################################
 
 async def longpoll_loop(server: StratumServer):
@@ -127,9 +130,10 @@ async def longpoll_loop(server: StratumServer):
 # Boot sequence: create the server (prints the startup
 # banner) -> cut the initial job -> open the stratum port ->
 # run listener, refresh loop and longpoll loop concurrently.
+# The node RPC session is closed when they end.
 #
 # Used by:
-#   - main.py — via families.active().run()
+#   - main.py — main(), through families.active()
 ############################################################
 
 async def run():
@@ -139,6 +143,9 @@ async def run():
     # receives work immediately
     initial_job = await server.create_job()
     if initial_job:
+        # Dead call: no miner can be connected before the port
+        # opens below, so this returns at once — the first miner
+        # gets the job from handle_subscribe() instead
         await server.broadcast_new_job()
 
     # Open the stratum port for miners

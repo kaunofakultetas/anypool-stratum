@@ -17,14 +17,14 @@
 #    - once the ntime is that old, the same-tip template must
 #      cut a REFRESHED job: new job id, fresh ntime, same
 #      prevhash/height
-#    - the refresh broadcast carries clean_jobs=False so
-#      miners keep their in-flight work; a moved-tip job
-#      still broadcasts clean_jobs=True
+#    - the refresh is broadcast with clean_jobs off, so
+#      miners keep their in-flight work; a moved-tip job is
+#      still broadcast with clean_jobs on
 #    - a hash that solves a BLOCK while missing the share
-#      target (possible whenever pool difficulty > network
-#      difficulty, e.g. rental-recommended fixed difficulty
-#      on a low-difficulty chain) must be accepted and
-#      submitted, never rejected as "low difficulty"
+#      target (possible whenever the pool difficulty sits
+#      above the network's, as with a rental service's fixed
+#      difficulty on a low-difficulty chain) must be accepted
+#      and submitted, never rejected as "low difficulty"
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -40,6 +40,10 @@ from tests.test_server import drain, make_server, moved_tip_template, submit_sha
 
 
 
+
+
+
+
 ############################################################
 # same_tip_template
 ############################################################
@@ -49,13 +53,18 @@ from tests.test_server import drain, make_server, moved_tip_template, submit_sha
 # keeps ticking on the node regardless of blocks.
 #
 # Used by:
-#   - tests/test_job_freshness.py — the test cases below
+#   - TestJobNtimeRefresh (below) — every test case but
+#     test_new_tip_broadcast_cleans_jobs
 ############################################################
 
 def same_tip_template(seconds_later):
     template = dict(vectors.TEMPLATE)
     template["curtime"] = vectors.TEMPLATE["curtime"] + seconds_later
     return template
+
+
+
+
 
 
 
@@ -69,10 +78,29 @@ def same_tip_template(seconds_later):
 # on the exact mining.notify parameters (clean_jobs flag).
 #
 # Used by:
-#   - tests/test_job_freshness.py — the broadcast test cases
+#   - test_refresh_broadcast_keeps_inflight_work and
+#     test_new_tip_broadcast_cleans_jobs (below)
 ############################################################
 
 class FakeClient:
+
+
+
+
+
+
+    ############################################################
+    # __init__
+    ############################################################
+    #
+    # Starts with no notifications recorded, carrying the
+    # connection attributes a broadcast prints for every
+    # client it reached.
+    #
+    # Used by:
+    #   - test_refresh_broadcast_keeps_inflight_work and
+    #     test_new_tip_broadcast_cleans_jobs (below)
+    ############################################################
 
     def __init__(self):
         self.notifications = []
@@ -83,12 +111,52 @@ class FakeClient:
         self.miner_software = "FakeClient/1.0"
         self.extra_nonce1 = vectors.EXTRANONCE1
 
+
+
+
+
+
+    ############################################################
+    # send_notification
+    ############################################################
+    #
+    # The send_notification() signature of a stratum
+    # connection (stratum/base.py): records the method and its
+    # parameters instead of writing them to a socket.
+    #
+    # Used by:
+    #   - StratumServer.broadcast_new_job()
+    #     (families/bitcoin/server.py) — the
+    #     mining.set_difficulty and mining.notify it sends
+    ############################################################
+
     async def send_notification(self, method, params):
         self.notifications.append((method, params))
+
+
+
+
+
+
+    ############################################################
+    # notify_params
+    ############################################################
+    #
+    # The parameter list of every mining.notify received, in
+    # order — the clean_jobs flag is the last entry of each.
+    #
+    # Used by:
+    #   - test_refresh_broadcast_keeps_inflight_work and
+    #     test_new_tip_broadcast_cleans_jobs (below)
+    ############################################################
 
     def notify_params(self):
         return [params for (method, params) in self.notifications
                 if method == "mining.notify"]
+
+
+
+
 
 
 
@@ -103,7 +171,7 @@ class FakeClient:
 # new work and the keep-the-job path could never be exercised.
 #
 # Used by:
-#   - tests/test_job_freshness.py — the test cases below
+#   - TestJobNtimeRefresh (below) — every test case
 ############################################################
 
 def make_freshness_server():
@@ -115,12 +183,31 @@ def make_freshness_server():
 
 
 
+
+
+
+
+############################################################
+# TestJobNtimeRefresh
+############################################################
+#
+# create_job() on a chain whose tip does not move: when the
+# current job is kept, when it is re-issued with a fresh
+# ntime, and how each kind of new job is announced to the
+# miners.
+############################################################
+
 class TestJobNtimeRefresh(unittest.IsolatedAsyncioTestCase):
 
 
 
 
+
+
     ############################################################
+    # test_fresh_job_is_kept_on_same_tip
+    ############################################################
+    #
     # Same tip, ntime still young: the job the miners are
     # hashing must be kept — a pointless re-issue would churn
     # job ids for nothing.
@@ -138,7 +225,12 @@ class TestJobNtimeRefresh(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
     ############################################################
+    # test_stale_ntime_cuts_refreshed_job
+    ############################################################
+    #
     # Same tip, ntime one refresh interval old: a REFRESHED job
     # must be cut — fresh ntime from the new template, new job
     # id, but the same parent and height (no block happened).
@@ -162,7 +254,12 @@ class TestJobNtimeRefresh(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
     ############################################################
+    # test_refresh_repeats_every_interval
+    ############################################################
+    #
     # The job must never be allowed to grow stale: as long as
     # the node keeps reporting later curtimes, every refresh
     # interval must produce a fresh job again.
@@ -185,9 +282,14 @@ class TestJobNtimeRefresh(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
     ############################################################
+    # test_refresh_broadcast_keeps_inflight_work
+    ############################################################
+    #
     # A refresh is the SAME work with a newer timestamp, so its
-    # broadcast must say clean_jobs=False — miners keep their
+    # broadcast must carry clean_jobs off — miners keep their
     # in-flight shares instead of restarting every interval.
     ############################################################
 
@@ -207,10 +309,15 @@ class TestJobNtimeRefresh(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
     ############################################################
+    # test_new_tip_broadcast_cleans_jobs
+    ############################################################
+    #
     # A moved tip is genuinely NEW work: its broadcast must
-    # keep saying clean_jobs=True so miners abandon work on
-    # the orphaned parent immediately.
+    # keep carrying clean_jobs on, so miners drop their work
+    # on the old tip immediately.
     ############################################################
 
     async def test_new_tip_broadcast_cleans_jobs(self):
@@ -229,12 +336,30 @@ class TestJobNtimeRefresh(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
+
+
+############################################################
+# TestBlockBelowShareTarget
+############################################################
+#
+# process_share() judging a block-grade hash on its own
+# merits when the pool difficulty sits above the network's,
+# instead of looking for blocks only among accepted shares.
+############################################################
+
 class TestBlockBelowShareTarget(unittest.IsolatedAsyncioTestCase):
 
 
 
 
+
+
     ############################################################
+    # test_block_missing_share_target_is_still_submitted
+    ############################################################
+    #
     # Pool difficulty above network difficulty (rental services
     # demand a high fixed difficulty; a young chain sits far
     # below it): a hash can solve a block while missing the
@@ -257,6 +382,10 @@ class TestBlockBelowShareTarget(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(server.rpc.submitted_blocks()), 1)
         self.assertEqual(server.blocks_found, 1)
         self.assertEqual(server.shares_accepted, 1)
+
+
+
+
 
 
 

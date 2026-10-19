@@ -9,11 +9,12 @@
 #
 #  Two kinds of output:
 #
-#    - Operator panels (green/red) — always printed: startup
-#      banner, new block detected, job created/broadcasted,
-#      share validation results.
-#    - Debug panels (blue/red)     — printed only when the
-#      DEBUG env variable is true, via debug_box().
+#    - Operator panels (green, yellow while MWEB waits, red)
+#      — always printed: startup banner, new block detected,
+#      job created/broadcasted, share validation results,
+#      the MWEB deployment story.
+#    - Debug panels (blue/red) — printed only when the DEBUG
+#      env variable is true, via debug_box().
 #
 #  Bitcoin-family panels take stratum-v1-shaped jobs; the
 #  mweb_* panels tell the MWEB activation story (deployment
@@ -48,10 +49,11 @@ from anypool import config
 # timestamp
 ############################################################
 #
-# The "YYYY-MM-DD HH:MM:SS" prefix used in panel titles.
+# The local date and time, year first and down to the
+# second, that opens a panel title.
 #
 # Used by:
-#   - display.py — panel titles below
+#   - every panel below except startup_banner and debug_box
 ############################################################
 
 def timestamp() -> str:
@@ -69,8 +71,8 @@ def timestamp() -> str:
 ############################################################
 #
 # Prints a boxed debug panel, but only when DEBUG is enabled.
-# Callers pass pre-formatted lines; use ljust() for aligned
-# label/value columns.
+# Callers pass the lines ready-formatted, each label padded
+# to a fixed width so the label/value columns line up.
 #
 # Used by:
 #   - families/bitcoin/ — coinbase, jobs, shares, server
@@ -100,8 +102,9 @@ def debug_box(title: str, lines: List[str], color: str = "blue") -> None:
 # startup_banner
 ############################################################
 #
-# The green box shown once when the pool boots, summarizing
-# the whole configuration at a glance.
+# The green box shown once when the pool boots: coin and
+# network, the node's RPC URL, the stratum port, the reward
+# address and the pool difficulty, at a glance.
 #
 # Used by:
 #   - families/bitcoin/server.py    — StratumServer.__init__()
@@ -136,7 +139,10 @@ def startup_banner(pool_difficulty: int) -> None:
 ############################################################
 #
 # Announces that the chain tip moved and we are about to cut
-# a fresh job for the new height.
+# a fresh job on top of it: the height and hash given are
+# the new tip's, the parent of the coming template. The hash
+# is labelled SHA256 for both families, although a
+# CryptoNote block id is a keccak hash.
 #
 # Used by:
 #   - families/bitcoin/server.py    — create_job() on a new template
@@ -217,7 +223,8 @@ def job_created_panel(job: Dict, pool_difficulty: int, network_difficulty: int,
 ############################################################
 #
 # Lists every connected miner a job was just pushed to, with
-# its IP, mining software and assigned extranonce1.
+# its IP, mining software, worker name and assigned
+# extranonce1.
 #
 # Used by:
 #   - families/bitcoin/server.py — broadcast_new_job()
@@ -257,7 +264,11 @@ def broadcast_panel(job_id: str, clients) -> None:
 # The verdict box printed for every submitted share: whether
 # it met the pool target, whether it is a full block, and all
 # hashes/targets involved so a rejected share can be debugged
-# straight from the logs.
+# straight from the logs. Only shares that got as far as the
+# hash comparison arrive here, so "rejected" always means the
+# hash was too high — stale jobs, out-of-range ntimes,
+# duplicates and malformed params are turned away earlier
+# with a one-line log.
 #
 # Used by:
 #   - families/bitcoin/server.py — process_share()
@@ -563,9 +574,11 @@ def cn_broadcast_panel(deliveries) -> None:
 ############################################################
 #
 # The CryptoNote counterpart of share_result_panel: the
-# verdict box for every submitted share with the PoW hash and
-# both targets, so a rejected share can be debugged straight
-# from the logs.
+# verdict box for every submitted share with the PoW hash,
+# the little-endian number it is judged as, and both
+# targets, so a rejected share can be debugged straight from
+# the logs. As there, only shares that reached the
+# difficulty check arrive here.
 #
 # Used by:
 #   - families/cryptonote/server.py — process_share()

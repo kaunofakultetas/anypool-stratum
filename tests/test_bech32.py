@@ -23,6 +23,16 @@ from tests import vectors
 
 
 
+############################################################
+# TestP2wpkhScript
+############################################################
+#
+# p2wpkh_script_for_address(), the module's entry point, on
+# the pool's real KNF reward address: the payout script it
+# must yield, the network prefix it must check, the letter
+# case it must not care about.
+############################################################
+
 class TestP2wpkhScript(unittest.TestCase):
 
 
@@ -31,6 +41,9 @@ class TestP2wpkhScript(unittest.TestCase):
 
 
     ############################################################
+    # test_reward_address_to_script
+    ############################################################
+    #
     # The pool's real reward address must decode to the exact
     # payout script embedded in the accepted block's coinbase.
     ############################################################
@@ -45,6 +58,9 @@ class TestP2wpkhScript(unittest.TestCase):
 
 
     ############################################################
+    # test_wrong_prefix_rejected
+    ############################################################
+    #
     # A wrong network prefix must be refused, even for an
     # otherwise perfectly valid address.
     ############################################################
@@ -59,6 +75,9 @@ class TestP2wpkhScript(unittest.TestCase):
 
 
     ############################################################
+    # test_uppercase_address
+    ############################################################
+    #
     # Uppercase form of the same address is equally valid per
     # BIP-173 and must decode to the same script.
     ############################################################
@@ -74,6 +93,15 @@ class TestP2wpkhScript(unittest.TestCase):
 
 
 
+############################################################
+# TestBech32Decode
+############################################################
+#
+# bech32_decode() taking an address apart: the prefix and
+# data values of a valid address, and nothing at all for a
+# malformed one.
+############################################################
+
 class TestBech32Decode(unittest.TestCase):
 
 
@@ -82,7 +110,12 @@ class TestBech32Decode(unittest.TestCase):
 
 
     ############################################################
-    # Corrupted checksums and malformed strings decode to None.
+    # test_malformed_addresses
+    ############################################################
+    #
+    # A corrupted checksum, a missing separator, mixed case and
+    # a data part too short to hold a checksum all decode to
+    # nothing — None for both the prefix and the data.
     ############################################################
 
     def test_malformed_addresses(self):
@@ -98,6 +131,9 @@ class TestBech32Decode(unittest.TestCase):
 
 
     ############################################################
+    # test_hrp_extraction
+    ############################################################
+    #
     # The decoded human-readable part must match the coin prefix.
     ############################################################
 
@@ -114,6 +150,14 @@ class TestBech32Decode(unittest.TestCase):
 
 
 
+############################################################
+# TestConvertbits
+############################################################
+#
+# convertbits(), the regrouping of the address's 5-bit data
+# values into the bytes of its witness program.
+############################################################
+
 class TestConvertbits(unittest.TestCase):
 
 
@@ -122,8 +166,12 @@ class TestConvertbits(unittest.TestCase):
 
 
     ############################################################
-    # 5-bit -> 8-bit regrouping must be reversible and produce
-    # exactly the 20-byte witness program for our address.
+    # test_witness_program_length
+    ############################################################
+    #
+    # Regrouping the address's 5-bit values into 8-bit bytes
+    # must yield exactly the 20-byte witness program inside
+    # the pool's payout script.
     ############################################################
 
     def test_witness_program_length(self):
@@ -138,7 +186,11 @@ class TestConvertbits(unittest.TestCase):
 
 
     ############################################################
-    # Out-of-range values must be refused.
+    # test_rejects_out_of_range
+    ############################################################
+    #
+    # A value too wide for the source width, or a negative
+    # one, must be refused.
     ############################################################
 
     def test_rejects_out_of_range(self):

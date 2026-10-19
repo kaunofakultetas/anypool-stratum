@@ -6,11 +6,13 @@
 #  Bitcoin family: the DAEMON builds the whole block from
 #  the pool's wallet address, the pool only injects an
 #  extranonce into the template's reserved space, derives
-#  the 76-byte hashing blob, and miners (XMRig etc.) speak
-#  the login/job/submit dialect and roll a 4-byte nonce.
+#  the (usually 76-byte) hashing blob, and miners (XMRig
+#  etc.) speak the login/job/submit dialect and roll a
+#  4-byte nonce.
 #
-#    runner.py     — boot + tip-height poll loop (the 0.11
-#                    daemon has no longpoll)
+#    runner.py     — boot, the tip-height poll (the 0.11
+#                    daemon has no longpoll) and the
+#                    periodic template refresh
 #    server.py     — template pipeline, share judgment
 #                    (CryptoNight), block submission
 #    connection.py — the CryptoNote stratum dialect

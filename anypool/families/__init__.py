@@ -19,10 +19,10 @@
 #  coin and therefore one family. Adding a coin to an
 #  existing family never touches family code (see coins/);
 #  adding a NEW family means a new subpackage here exposing
-#  an async run().
+#  an async run(), plus its branch in active().
 #
 #  Used by:
-#    - main.py — families.active().run()
+#    - main.py — main() picks its runner through active()
 ############################################################
 
 
@@ -41,10 +41,11 @@ from anypool import coins
 #
 # The runner module of the active coin's family. Imports
 # lazily so a Bitcoin-family pool never imports CryptoNote
-# dependencies and vice versa.
+# dependencies and vice versa. A family it does not know
+# stops the pool at boot.
 #
 # Used by:
-#   - main.py
+#   - main.py — main()
 ############################################################
 
 def active():

@@ -7,29 +7,32 @@
 #  extranonce1 was assigned by us), it reconstructs the exact
 #  80-byte block header and its PoW hash.
 #
-#  This ONE function is used both to validate shares and to
-#  build the header of a block we submit to the network — so
-#  a share we accept as a block is guaranteed to serialize to
-#  the same header we submit. Keep it that way: a second
-#  header-assembly path could silently drift from this one.
+#  The header this ONE function builds to validate a share is
+#  also the header of the block we submit — process_share()
+#  hands it on to block assembly — so a share we accept as a
+#  block is guaranteed to serialize to the same header we
+#  submit. Keep it that way: a second header-assembly path
+#  could silently drift from this one.
 #
 #  Endianness cheat-sheet for the header fields, going from
 #  the stratum job values to serialized header bytes:
 #
-#    version   — byte-reversed          (reverse_hex)
-#    prevhash  — word-reversed          (reverse_hex_4b_chunks)
-#    merkle    — used as-is             (already header order)
-#    ntime     — byte-reversed          (reverse_hex)
-#    nbits     — byte-reversed          (reverse_hex)
-#    nonce     — byte-reversed          (reverse_hex)
+#    version   — byte-reversed            (reverse_hex)
+#    prevhash  — byte-reversed per word   (reverse_hex_4b_chunks)
+#    merkle    — used as-is               (already header order)
+#    ntime     — byte-reversed            (reverse_hex)
+#    nbits     — byte-reversed            (reverse_hex)
+#    nonce     — byte-reversed            (reverse_hex)
 #
 #  The PoW function itself is NOT hardcoded here — it comes
 #  from the active coin's definition (anypool/coins/), so
 #  supporting a non-Scrypt coin needs no change in this file.
 #
 #  Used by:
-#    - families/bitcoin/server.py     — process_share() + _submit_block()
-#    - families/bitcoin/connection.py — validate_share_params() on submit
+#    - families/bitcoin/server.py     — process_share(): ntime
+#      window and header rebuild
+#    - families/bitcoin/connection.py — handle_submit(): param
+#      and version-bits checks
 ############################################################
 
 
@@ -64,9 +67,9 @@ NTIME_BACKWARD_SLACK = 600
 # bits are ALLOWED (inside the negotiated mask) is a separate,
 # per-connection question — see version_bits_allowed().
 #
-# Expected params:
-#   [worker_name, job_id, extra_nonce2, ntime, nonce]
-#   [worker_name, job_id, extra_nonce2, ntime, nonce, version_bits]
+# The entries are the worker name, job id, extranonce2, ntime
+# and nonce, then the optional version bits; worker name and
+# job id are not checked here.
 #
 # Used by:
 #   - families/bitcoin/connection.py — handle_submit()
@@ -197,25 +200,26 @@ def rolled_version(job_version_hex: str, version_bits_hex: str, mask: int) -> st
 # Reconstructs the 80-byte block header a miner hashed for a
 # given job + nonce combination, in four steps:
 #
-#   1. Reassemble the coinbase tx (txid serialization):
-#        coinb1 + extranonce1 + extranonce2 + coinb2
-#      and double-SHA256 it into the coinbase txid.
+#   1. Reassemble the coinbase tx in its txid serialization
+#      — coinb1, extranonce1, extranonce2 and coinb2, in that
+#      order — and double-SHA256 it into the coinbase txid.
 #   2. Fold the txid through the job's merkle branch to get
 #      the merkle root.
 #   3. Convert each header field to serialized byte order
-#      (see the cheat-sheet in the module header).
+#      (see the cheat-sheet in the module header), the
+#      version with the miner's rolled bits applied.
 #   4. Concatenate into the header and hash it with the
 #      active coin's PoW function.
 #
-# Returns (pow_hash_hex, header_hex, header_bytes).
-# The caller compares int(pow_hash_hex, 16) against the
-# pool / network targets.
+# Returns the PoW hash as big-endian hex, the header as hex
+# and the header bytes. The caller reads the PoW hash as an
+# integer and compares it against the pool and network
+# targets, and hands the header hex on to block assembly.
 #
-# `context` only labels the DEBUG panels so logs show whether
-# the header was built during validation or block submission.
+# context only names the caller in the DEBUG panels.
 #
 # Used by:
-#   - families/bitcoin/server.py — process_share() and _submit_block()
+#   - families/bitcoin/server.py — process_share()
 ############################################################
 
 def build_header(job: Dict, extra_nonce1: str, extra_nonce2: str,

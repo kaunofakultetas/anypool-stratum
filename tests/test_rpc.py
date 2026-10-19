@@ -40,6 +40,16 @@ from tests import mweb_vectors as mv
 
 
 
+############################################################
+# TestNodeRPC
+############################################################
+#
+# NodeRPC.call() against a real HTTP server on the loopback:
+# what goes over the wire — path, body, credentials — and
+# what comes back for every kind of answer a node, or a
+# proxy in front of it, can give.
+############################################################
+
 class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
@@ -48,9 +58,13 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # A node on the loopback that records each request (path
-    # as sent, body, auth header) and answers with `reply` —
-    # a status and a JSON body, or a status and plain text.
+    # asyncSetUp
+    ############################################################
+    #
+    # A node on the loopback — aiohttp's test server on a free
+    # port — that records each request and answers with
+    # `reply`, an empty successful answer until a test sets
+    # its own; and a NodeRPC pointed at it.
     ############################################################
 
     async def asyncSetUp(self):
@@ -71,6 +85,9 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # asyncTearDown
+    ############################################################
+    #
     # Closes the client's session and stops the node.
     ############################################################
 
@@ -84,7 +101,17 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # The node's request handler.
+    # answer
+    ############################################################
+    #
+    # The loopback node's handler for every POST: records the
+    # request as it arrived (the raw path, the decoded body,
+    # the Authorization header) and answers with `reply` — a
+    # status with a JSON body, or with text served as an HTML
+    # page, the way an overloaded node or a proxy answers.
+    #
+    # Used by:
+    #   - asyncSetUp (above) — the route every request takes
     ############################################################
 
     async def answer(self, request):
@@ -104,8 +131,12 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # The request a plain call sends, and the result it hands
-    # back.
+    # test_call_posts_a_json_rpc_body_and_returns_the_result
+    ############################################################
+    #
+    # The request a plain call sends — a JSON-RPC 1.0 body on
+    # the root path, with the configured basic auth — and the
+    # result it hands back.
     ############################################################
 
     async def test_call_posts_a_json_rpc_body_and_returns_the_result(self):
@@ -127,6 +158,9 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_named_arguments_travel_as_an_object
+    ############################################################
+    #
     # Named arguments travel as an object, positional ones as
     # a list.
     ############################################################
@@ -146,8 +180,13 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # A wallet call goes to /wallet/<name>, the name escaped
-    # whole — a slash or space in it cannot change the path.
+    # test_wallet_calls_go_to_the_wallets_endpoint
+    ############################################################
+    #
+    # A wallet call goes to that wallet's own endpoint under
+    # /wallet/, its name escaped whole — a slash or space in
+    # it cannot change the path — while a call without a
+    # wallet stays on the root path.
     ############################################################
 
     async def test_wallet_calls_go_to_the_wallets_endpoint(self):
@@ -166,6 +205,9 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_refusal_under_http_500_is_a_node_rpc_error
+    ############################################################
+    #
     # The node's real refusal of the first MWEB block's
     # template, under HTTP 500: a NodeRPCError carrying its
     # code and message, worded as the log always showed it.
@@ -187,6 +229,9 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_refusal_under_http_200_too
+    ############################################################
+    #
     # A refusal under HTTP 200 is the same refusal.
     ############################################################
 
@@ -204,6 +249,9 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_no_json_rpc_answer_reports_the_status
+    ############################################################
+    #
     # Anything that is no JSON-RPC answer reports the HTTP
     # status and the start of the body — and is no refusal.
     ############################################################
@@ -229,6 +277,15 @@ class TestNodeRPC(unittest.IsolatedAsyncioTestCase):
 
 
 
+############################################################
+# TestNodeRPCError
+############################################################
+#
+# NodeRPCError built straight from an error that is not the
+# usual object — a shape no node in TestNodeRPC sends, which
+# the pool must still keep and log whole.
+############################################################
+
 class TestNodeRPCError(unittest.TestCase):
 
 
@@ -237,8 +294,12 @@ class TestNodeRPCError(unittest.TestCase):
 
 
     ############################################################
-    # An error that is not the usual {code, message} object is
-    # kept whole, with no code and its text as the message.
+    # test_odd_error_shapes_are_kept_whole
+    ############################################################
+    #
+    # An error that is not the usual object with a code and a
+    # message is kept whole: no code, its text as the message,
+    # and the log's usual wording.
     ############################################################
 
     def test_odd_error_shapes_are_kept_whole(self):

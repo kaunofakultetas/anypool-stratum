@@ -4,10 +4,10 @@
 #  Covers anypool/coins/: every registered coin must be
 #  internally consistent, the getblocktemplate request must
 #  adapt to old daemons (no rules param), the address schemes
-#  must produce the right payout script types, and the MWEB
-#  peg-in settings — carried by exactly the coins with MWEB —
-#  must read and judge the environment the way an operator
-#  expects.
+#  must produce the right payout script types, only BTC may
+#  let miners roll the version, and the MWEB peg-in settings
+#  — carried by exactly the coins with MWEB — must read and
+#  judge the environment the way an operator expects.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -30,6 +30,15 @@ from tests.test_base58 import DOGE_ADDR, DOGE_HASH160
 
 
 
+############################################################
+# TestRegistry
+############################################################
+#
+# The coin registry as a whole: every definition complete
+# for its family, every coin bootable through its family's
+# runner, and the active coin following the configuration.
+############################################################
+
 class TestRegistry(unittest.TestCase):
 
 
@@ -38,6 +47,9 @@ class TestRegistry(unittest.TestCase):
 
 
     ############################################################
+    # test_definitions_are_consistent
+    ############################################################
+    #
     # Every registered coin must be complete and consistent —
     # the contract differs per family, so each is checked
     # against the fields ITS family actually uses.
@@ -63,12 +75,20 @@ class TestRegistry(unittest.TestCase):
 
 
     ############################################################
+    # test_every_coin_resolves_to_a_runner
+    ############################################################
+    #
     # Every registered coin must resolve to a runner module —
     # a coin whose family has no implementation would only
     # fail at boot, in production.
     ############################################################
 
     def test_every_coin_resolves_to_a_runner(self):
+        # Redundant: os and mock are already imported at module
+        # level, and the os.environ patch below changes nothing
+        # the lookup reads — config.py takes COIN from the
+        # environment once, at import, and the config.COIN
+        # patch beside it sets the value itself
         import os
         from unittest import mock
 
@@ -87,8 +107,12 @@ class TestRegistry(unittest.TestCase):
 
 
     ############################################################
-    # active() must follow the COIN environment variable
-    # (pinned to KNF by tests/__init__.py).
+    # test_active_coin
+    ############################################################
+    #
+    # active() must return the coin config.COIN names — KNF,
+    # the COIN value tests/__init__.py pins before config.py
+    # reads the environment.
     ############################################################
 
     def test_active_coin(self):
@@ -101,6 +125,15 @@ class TestRegistry(unittest.TestCase):
 
 
 
+############################################################
+# TestGbtRequest
+############################################################
+#
+# The getblocktemplate request each coin's daemon needs —
+# the rules it must ask for, or no request object at all
+# for daemons older than the rules mechanism.
+############################################################
+
 class TestGbtRequest(unittest.TestCase):
 
 
@@ -109,6 +142,9 @@ class TestGbtRequest(unittest.TestCase):
 
 
     ############################################################
+    # test_modern_coin_request
+    ############################################################
+    #
     # Modern Litecoin-family daemons get the rules list, plus
     # the longpollid when re-arming a longpoll.
     ############################################################
@@ -128,6 +164,9 @@ class TestGbtRequest(unittest.TestCase):
 
 
     ############################################################
+    # test_old_coin_request
+    ############################################################
+    #
     # Old daemons (Dogecoin) get NO request object at all for a
     # plain poll — some predate the rules mechanism entirely.
     ############################################################
@@ -144,6 +183,9 @@ class TestGbtRequest(unittest.TestCase):
 
 
     ############################################################
+    # test_btc_request
+    ############################################################
+    #
     # Bitcoin Core REFUSES getblocktemplate without the segwit
     # rule — it must always be requested.
     ############################################################
@@ -164,6 +206,16 @@ class TestGbtRequest(unittest.TestCase):
 
 
 
+############################################################
+# TestAddressSchemes
+############################################################
+#
+# The payout script each coin's address scheme turns a
+# reward address into, and the refusal of another coin's or
+# another network's address — what stops a misconfigured
+# pool at boot instead of paying a block away.
+############################################################
+
 class TestAddressSchemes(unittest.TestCase):
 
 
@@ -172,6 +224,9 @@ class TestAddressSchemes(unittest.TestCase):
 
 
     ############################################################
+    # test_bech32_scheme
+    ############################################################
+    #
     # KNF (bech32 scheme) must produce the P2WPKH script from
     # the accepted block 1777.
     ############################################################
@@ -187,6 +242,9 @@ class TestAddressSchemes(unittest.TestCase):
 
 
     ############################################################
+    # test_base58_scheme
+    ############################################################
+    #
     # DOGE (base58 scheme) must produce a legacy P2PKH script.
     ############################################################
 
@@ -201,6 +259,9 @@ class TestAddressSchemes(unittest.TestCase):
 
 
     ############################################################
+    # test_cross_coin_addresses_rejected
+    ############################################################
+    #
     # Feeding one coin's address to another coin's scheme must
     # fail — the config validator relies on this.
     ############################################################
@@ -217,6 +278,9 @@ class TestAddressSchemes(unittest.TestCase):
 
 
     ############################################################
+    # test_btc_bech32_scheme
+    ############################################################
+    #
     # BTC bech32 scheme, checked against the canonical BIP173
     # reference vectors (same 20-byte program on both networks).
     # testnet3 and testnet4 share the "tb" prefix — the same
@@ -251,6 +315,14 @@ class TestAddressSchemes(unittest.TestCase):
 
 
 
+############################################################
+# TestVersionRolling
+############################################################
+#
+# Which coins let miners roll the header version (BIP310),
+# and with which mask.
+############################################################
+
 class TestVersionRolling(unittest.TestCase):
 
 
@@ -259,10 +331,13 @@ class TestVersionRolling(unittest.TestCase):
 
 
     ############################################################
-    # BTC carries the standard BIP320 mask; every other coin
-    # must decline version rolling (mask 0) — Dogecoin's
-    # version bits encode the AuxPoW chain id, and the scrypt
-    # coins were validated without rolling.
+    # test_masks
+    ############################################################
+    #
+    # BTC carries the standard BIP320 mask; KNF, LTC and
+    # Dogecoin must decline version rolling (mask 0) —
+    # Dogecoin's version bits encode the AuxPoW chain id, and
+    # the scrypt coins were validated without rolling.
     ############################################################
 
     def test_masks(self):
@@ -278,6 +353,15 @@ class TestVersionRolling(unittest.TestCase):
 
 
 
+############################################################
+# TestMwebPegin
+############################################################
+#
+# The MWEB peg-in settings: which coins carry them, how they
+# are read from the environment and judged, and the decimal
+# check the amount and the fee rate go through.
+############################################################
+
 class TestMwebPegin(unittest.TestCase):
 
 
@@ -286,6 +370,9 @@ class TestMwebPegin(unittest.TestCase):
 
 
     ############################################################
+    # test_coins_with_mweb_carry_peg_in_settings
+    ############################################################
+    #
     # Exactly the coins with MWEB carry peg-in settings — KNF
     # and LTC; Bitcoin and Dogecoin have neither.
     ############################################################
@@ -305,6 +392,9 @@ class TestMwebPegin(unittest.TestCase):
 
 
     ############################################################
+    # test_settings_come_from_the_environment
+    ############################################################
+    #
     # The settings come from MWEB_PEGIN_AMOUNT, _WALLET and
     # _FEE_RATE, trimmed, an empty wallet name meaning none —
     # and with none of them set, nothing is set.
@@ -331,6 +421,9 @@ class TestMwebPegin(unittest.TestCase):
 
 
     ############################################################
+    # test_problems_name_the_setting
+    ############################################################
+    #
     # Valid settings have no problem; each broken one names
     # the setting to fix.
     ############################################################
@@ -359,6 +452,9 @@ class TestMwebPegin(unittest.TestCase):
 
 
     ############################################################
+    # test_positive_decimals
+    ############################################################
+    #
     # Positive numbers within the decimal places pass; zero,
     # negatives, words, empty text, NaN, infinity and anything
     # finer than the places allow are refused.

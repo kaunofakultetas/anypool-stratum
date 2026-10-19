@@ -37,7 +37,7 @@ from tests import vectors
 # math is verified against something, not against itself.
 #
 # Used by:
-#   - tests/test_merkle.py — property tests below
+#   - test_branch_folds_back_to_root (below)
 ############################################################
 
 def reference_merkle_root(tx_hashes_hex):
@@ -55,6 +55,15 @@ def reference_merkle_root(tx_hashes_hex):
 
 
 
+############################################################
+# TestBlock1777
+############################################################
+#
+# The degenerate tree of a coinbase-only block such as 1777:
+# no branch at all, so the coinbase txid itself is the
+# merkle root that went into the accepted header.
+############################################################
+
 class TestBlock1777(unittest.TestCase):
 
 
@@ -63,7 +72,12 @@ class TestBlock1777(unittest.TestCase):
 
 
     ############################################################
-    # A coinbase-only block has an empty merkle branch.
+    # test_single_tx_branch_is_empty
+    ############################################################
+    #
+    # A coinbase-only block has an empty merkle branch. The
+    # leaf is block 1777's coinbase txid as build_job()
+    # computes it, with all-zero placeholder extranonces.
     ############################################################
 
     def test_single_tx_branch_is_empty(self):
@@ -76,6 +90,9 @@ class TestBlock1777(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_root_equals_coinbase_txid
+    ############################################################
+    #
     # With an empty branch, the root is the leaf itself. This is
     # exactly what happened for the accepted share of block 1777:
     # the real coinbase txid became the header's merkle root.
@@ -96,6 +113,16 @@ class TestBlock1777(unittest.TestCase):
 
 
 
+############################################################
+# TestBranchRootProperty
+############################################################
+#
+# Synthetic multi-transaction trees, held against the
+# reference root above: the coinbase's branch must fold back
+# to the full tree's root, and must not depend on the
+# coinbase itself.
+############################################################
+
 class TestBranchRootProperty(unittest.TestCase):
 
 
@@ -104,9 +131,12 @@ class TestBranchRootProperty(unittest.TestCase):
 
 
     ############################################################
-    # For trees of 2..8 leaves: the branch computed for the
-    # coinbase (index 0) must fold back to the same root as the
-    # independent reference implementation.
+    # test_branch_folds_back_to_root
+    ############################################################
+    #
+    # For trees of two to eight leaves: the branch computed for
+    # the coinbase (index 0) must fold back to the same root as
+    # the independent reference implementation.
     ############################################################
 
     def test_branch_folds_back_to_root(self):
@@ -126,6 +156,9 @@ class TestBranchRootProperty(unittest.TestCase):
 
 
     ############################################################
+    # test_branch_independent_of_coinbase
+    ############################################################
+    #
     # The branch of the coinbase must not depend on the coinbase
     # itself — that is what allows the pool to compute ONE branch
     # per job while every miner has a different extranonce.
@@ -148,7 +181,11 @@ class TestBranchRootProperty(unittest.TestCase):
 
 
     ############################################################
-    # Empty input is a valid degenerate case.
+    # test_empty_input
+    ############################################################
+    #
+    # An empty transaction list is a valid degenerate case:
+    # its branch is empty too.
     ############################################################
 
     def test_empty_input(self):

@@ -23,6 +23,8 @@ from anypool.families.cryptonote.blob import hashing_blob
 from tests import cn_vectors
 
 
+# Only the stratum image carries the C extension; probed here
+# so the class below is skipped elsewhere instead of erroring
 try:
     import pycryptonight  # noqa: F401
     HAVE_CRYPTONIGHT = True
@@ -36,6 +38,17 @@ except ImportError:
 
 
 
+############################################################
+# TestCryptoNightPoW
+############################################################
+#
+# The real CryptoNight hash through the py-cryptonight
+# extension: a published vector first, then the real final
+# block judged against its own network difficulty and
+# against an absurd one. Skipped, not failed, where the
+# extension is missing.
+############################################################
+
 @unittest.skipUnless(HAVE_CRYPTONIGHT, "py-cryptonight not installed (run inside the container)")
 class TestCryptoNightPoW(unittest.TestCase):
 
@@ -45,6 +58,9 @@ class TestCryptoNightPoW(unittest.TestCase):
 
 
     ############################################################
+    # test_known_vector
+    ############################################################
+    #
     # Library sanity: a published cn/0 vector, so a broken or
     # variant-confused extension is caught before any chain
     # data is blamed.
@@ -62,6 +78,9 @@ class TestCryptoNightPoW(unittest.TestCase):
 
 
     ############################################################
+    # test_real_block_meets_its_network_difficulty
+    ############################################################
+    #
     # The real block: hashing its blob must beat the network
     # difficulty of the block itself — exactly the check the
     # pool performs to decide "this share is a BLOCK".
@@ -83,8 +102,12 @@ class TestCryptoNightPoW(unittest.TestCase):
 
 
     ############################################################
-    # ...and NOT an absurdly higher one, proving the check
-    # actually discriminates instead of always passing.
+    # test_real_block_fails_absurd_difficulty
+    ############################################################
+    #
+    # The same real block must NOT meet an absurdly higher
+    # difficulty — proof the check actually discriminates
+    # instead of always passing.
     ############################################################
 
     def test_real_block_fails_absurd_difficulty(self):

@@ -12,6 +12,7 @@
 #    coinbase.py   — coinbase tx construction (BIP34, segwit)
 #    blocks.py     — full block serialization for submitblock
 #    shares.py     — header rebuild + PoW check helpers
+#    mweb.py       — MWEB deployment watch, first-block peg-in
 #    errors.py     — stratum v1 error tuples
 #
 #  Shared plumbing (line framing, client registry, stats)

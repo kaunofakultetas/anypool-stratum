@@ -7,9 +7,10 @@
 #  which makes encoded addresses fixed-length and decoding
 #  O(1) per block. Same alphabet as Bitcoin.
 #
-#  An address is:  varint(prefix) || spend_pub(32) ||
-#                  view_pub(32) || checksum(4)
-#  where checksum = keccak_256(everything before it)[:4].
+#  An address is four fields in order: the network prefix as
+#  a varint, the 32-byte public spend key, the 32-byte public
+#  view key, and a 4-byte checksum — the first four bytes of
+#  the keccak-256 of everything before it.
 #
 #  Used by:
 #    - coins/address.py — CryptoNoteAddress scheme (validate
@@ -24,10 +25,13 @@ from typing import Tuple
 from anypool.crypto.keccak import keccak_256
 
 
+# Bitcoin's base58 alphabet, and each character's digit value
 _ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _ALPHABET_INDEX = {c: i for i, c in enumerate(_ALPHABET)}
 
-# Encoded size (chars) of a partial final block of N bytes
+# Encoded size in characters of a block, indexed by its byte
+# count — a partial final block is shorter, a full 8-byte
+# block takes the last entry
 _ENCODED_BLOCK_SIZES = [0, 2, 3, 5, 6, 7, 9, 10, 11]
 
 _FULL_BLOCK_BYTES = 8
@@ -158,12 +162,14 @@ def decode(s: str) -> bytes:
 ############################################################
 #
 # The LEB128 varint CryptoNote uses everywhere: 7 bits per
-# byte, high bit = continuation.
+# byte, lowest bits first, the high bit set on every byte
+# but the last.
 #
 # Used by:
 #   - encode_addr (below) — the address prefix
-#   - families/cryptonote/blob.py — block reserialization
-#     and the tree-hash blob count
+#   - families/cryptonote/blob.py — hashing_blob(), the
+#     transaction count that closes the hashing blob, and
+#     block_id(), the blob's length prefix
 ############################################################
 
 def write_varint(value: int) -> bytes:
@@ -185,9 +191,10 @@ def write_varint(value: int) -> bytes:
 # read_varint
 ############################################################
 #
-# Reads one varint at `offset`; returns (value, new offset)
-# so parsers can chain calls. Truncated input surfaces as a
-# plain IndexError.
+# Reads one varint at the given offset and returns its value
+# together with the offset just past it, so parsers can
+# chain calls. Truncated input surfaces as a plain
+# IndexError.
 #
 # Used by:
 #   - decode_addr (below) — the address prefix
@@ -216,8 +223,8 @@ def read_varint(data: bytes, offset: int) -> Tuple[int, int]:
 # encode_addr
 ############################################################
 #
-# The address layer, encode side: varint(prefix) + payload,
-# sealed with the 4-byte keccak checksum.
+# The address layer, encode side: the prefix as a varint,
+# then the payload, sealed with the 4-byte keccak checksum.
 #
 # Used by:
 #   - tests/test_cn_crypto.py — address round-trips (nothing
@@ -244,6 +251,13 @@ def encode_addr(prefix: int, payload: bytes) -> str:
 # checksum and splits off the prefix varint. Raises
 # ValueError on any corruption, which config.validate()
 # turns into a readable startup error.
+#
+# Known bug, left as is: a checksum-valid body that is
+# nothing but varint continuation bytes runs read_varint()
+# off its end, and the IndexError that escapes stops the
+# pool with a traceback instead of the readable error. Only
+# a deliberately crafted address gets there; a typo fails
+# the checksum first.
 #
 # Used by:
 #   - coins/address.py — CryptoNoteAddress.validate_address()

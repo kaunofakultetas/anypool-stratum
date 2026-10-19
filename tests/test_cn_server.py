@@ -3,9 +3,10 @@
 #
 #  The CryptoNote counterpart of test_server.py: share
 #  judgment paths (unknown/foreign job, stale height,
-#  malformed nonce, duplicate, lying result, accept), the
-#  one-submission-per-parent sibling guard, per-connection
-#  difficulty parsing and the effective-difficulty clamps.
+#  malformed nonce, duplicate, lying result, low difficulty,
+#  accept), the one-submission-per-parent sibling guard,
+#  per-connection difficulty parsing and the
+#  effective-difficulty clamps.
 #
 #  CryptoNight itself is mocked here (a controlled hash lets
 #  every verdict path be steered precisely); the REAL PoW is
@@ -36,12 +37,13 @@ from tests import cn_vectors
 ############################################################
 #
 # The daemon's getblocktemplate answer for the captured
-# TEMPLATE_BLOB vector, shaped the way create_job() /
+# TEMPLATE_BLOB vector, shaped the way create_job() and
 # set_template() consume it.
 #
 # Used by:
-#   - make_server(), TestProcessShare — fresh and stale
-#     templates
+#   - make_server() (below) — the fresh template
+#   - TestProcessShare.test_stale_height_rejected (below) —
+#     the base of the stale one
 ############################################################
 
 def template_result():
@@ -61,10 +63,19 @@ def template_result():
 
 
 ############################################################
+# FakeClient
+############################################################
+#
 # Stands in for a CnConnection: process_share() only reads
 # identity fields off the client, so plain class attributes
 # are enough. Each instance is a distinct "connection" for
 # the foreign-job test.
+#
+# Used by:
+#   - TestProcessShare.setUp (below) — the client every job
+#     is issued to
+#   - TestProcessShare.test_foreign_job_rejected (below) —
+#     the second connection
 ############################################################
 
 class FakeClient:
@@ -92,11 +103,13 @@ TINY_HASH = (1).to_bytes(32, "little")
 ############################################################
 #
 # A CnStratumServer with the vector template already stored
-# and the network difficulty set — no RPC client is touched,
-# no sockets are opened.
+# (with the 16-byte reserve it was fetched with) and the
+# network difficulty set — no RPC client is touched, no
+# sockets are opened.
 #
 # Used by:
-#   - the test cases below
+#   - TestProcessShare.setUp and
+#     TestEffectiveDifficulty.setUp (below)
 ############################################################
 
 def make_server():
@@ -106,9 +119,9 @@ def make_server():
     return server
 
 
-# The CN server resolves the active coin at share time
-# (coins.active().cn_variant), so these tests pin COIN=LTL for
-# their whole module instead of trusting the process env or
+# The CN server resolves the active coin at share time (for
+# its cn_variant), so these tests pin COIN to LTL for their
+# whole module instead of trusting the process env or
 # whatever a previously run test module selected.
 _COIN_PATCH = patch("anypool.config.COIN", "LTL")
 
@@ -120,6 +133,9 @@ _COIN_PATCH = patch("anypool.config.COIN", "LTL")
 
 
 ############################################################
+# setUpModule
+############################################################
+#
 # unittest's module-wide fixture hook: the COIN pin starts
 # before the first test in this file runs.
 ############################################################
@@ -135,6 +151,9 @@ def setUpModule():
 
 
 ############################################################
+# tearDownModule
+############################################################
+#
 # The matching teardown: unpin COIN after this file's last
 # test, so later test modules see the process default again.
 ############################################################
@@ -149,6 +168,16 @@ def tearDownModule():
 
 
 
+############################################################
+# TestProcessShare
+############################################################
+#
+# process_share() verdict by verdict, with CryptoNight
+# mocked so each test can steer the hash: every reject gate
+# in the order the server runs them, the plain accept, and
+# the block path with its one-submission-per-parent guard.
+############################################################
+
 class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
@@ -157,8 +186,12 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # setUp
+    ############################################################
+    #
     # Every test starts from one issued job: pool difficulty
-    # 50, extranonce b"EXTRANON", owned by self.client.
+    # 50, an eight-byte extranonce, owned by the test's own
+    # FakeClient.
     ############################################################
 
     def setUp(self):
@@ -172,10 +205,17 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # submit
+    ############################################################
+    #
     # One process_share() call with CryptoNight mocked to
     # return hash_value — every keyword strays from a valid
     # submission in exactly one way, so each test names only
-    # its own deviation.
+    # its own deviation. Left alone, the claimed result is
+    # the honest hex of the mocked hash.
+    #
+    # Used by:
+    #   - every test case of TestProcessShare (below)
     ############################################################
 
     async def submit(self, job_id=None, nonce="00000001", result=None,
@@ -195,6 +235,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_unknown_job_rejected
+    ############################################################
+    #
     # First reject gate: a job id the manager never issued
     # answers "Invalid job id".
     ############################################################
@@ -210,6 +253,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_foreign_job_rejected
+    ############################################################
+    #
     # A share for a job issued to ANOTHER connection must not
     # count — job ids are per client in this family, and a
     # foreign job id looks exactly like an unknown one.
@@ -226,6 +272,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_stale_height_rejected
+    ############################################################
+    #
     # Once the template moved to a new tip, shares for jobs
     # cut from the old one answer "Block expired".
     ############################################################
@@ -244,6 +293,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_malformed_nonce_rejected
+    ############################################################
+    #
     # A non-hex nonce is rejected by the server's own shape
     # gate (the connection has one too, but the server must
     # not rely on it).
@@ -260,6 +312,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_duplicate_nonce_rejected
+    ############################################################
+    #
     # The same nonce twice on one job: first accepted, the
     # replay rejected — one winning share must not be
     # resubmittable to inflate the accepted count.
@@ -278,6 +333,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_lying_result_rejected
+    ############################################################
+    #
     # The claimed result must equal the recomputed hash — a
     # mismatch means broken or cheating mining software, and
     # the share is invalid even though the hash itself would
@@ -295,8 +353,11 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # A hash NOT meeting pool difficulty 50 (value just above
-    # the pool target: 2^256/10 > 2^256/50) answers with the
+    # test_low_difficulty_rejected
+    ############################################################
+    #
+    # A hash NOT meeting pool difficulty 50 — its value is
+    # only worth difficulty 10 — answers with the
     # conventional "Low difficulty share".
     ############################################################
 
@@ -312,6 +373,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_share_accepted
+    ############################################################
+    #
     # The accept path: meets pool difficulty but not network
     # grade — counted as a share, no submission task, no
     # parent marked.
@@ -331,6 +395,9 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_block_share_launches_single_submission
+    ############################################################
+    #
     # The block path: a network-grade hash launches exactly
     # ONE submission per parent — the second solve stays an
     # accepted share but the sibling guard swallows its
@@ -356,6 +423,17 @@ class TestProcessShare(unittest.IsolatedAsyncioTestCase):
 
 
 
+############################################################
+# TestEffectiveDifficulty
+############################################################
+#
+# effective_difficulty(): the difficulty a connection's jobs
+# are cut at — the pool default or the connection's own
+# request, kept within what the job's compact target can
+# encode, and capped at the network difficulty while
+# POLL_DIFF_DROPPER is on.
+############################################################
+
 class TestEffectiveDifficulty(unittest.TestCase):
 
 
@@ -364,6 +442,9 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
     ############################################################
+    # setUp
+    ############################################################
+    #
     # A pool default of 5000 for every clamp test below.
     ############################################################
 
@@ -377,7 +458,11 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # No per-connection request -> the pool default.
+    # test_default_when_no_request
+    ############################################################
+    #
+    # Without a per-connection request a client mines at the
+    # pool default.
     ############################################################
 
     def test_default_when_no_request(self):
@@ -389,8 +474,11 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # A requested difficulty overrides the default (in either
-    # direction).
+    # test_requested_difficulty_wins
+    ############################################################
+    #
+    # A requested difficulty overrides the default, in either
+    # direction — this test asks for one far above it.
     ############################################################
 
     def test_requested_difficulty_wins(self):
@@ -402,8 +490,12 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # Requests beyond 2^32-1 are clamped — the job's 4-byte
-    # compact target cannot encode more (see compact_target).
+    # test_clamped_to_target_encoding
+    ############################################################
+    #
+    # A request beyond the largest 32-bit value is clamped to
+    # it — the job's 4-byte compact target cannot encode more
+    # (see compact_target).
     ############################################################
 
     def test_clamped_to_target_encoding(self):
@@ -415,8 +507,14 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
     ############################################################
+    # test_clamped_to_at_least_one
+    ############################################################
+    #
     # Zero is falsy, so it degrades to the default rather
-    # than clamping up to 1.
+    # than clamping up to 1. Despite the test's name, the
+    # floor of 1 itself is never reached here — no test
+    # exercises it (only a pool difficulty below 1 or a
+    # negative request could hit it).
     ############################################################
 
     def test_clamped_to_at_least_one(self):
@@ -428,6 +526,9 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
     ############################################################
+    # test_dropper_caps_at_network_difficulty
+    ############################################################
+    #
     # With POLL_DIFF_DROPPER on, no connection mines above
     # the network difficulty — same dropper semantics as the
     # Bitcoin family, applied per client.
@@ -445,6 +546,16 @@ class TestEffectiveDifficulty(unittest.TestCase):
 
 
 
+############################################################
+# TestParseClientDifficulty
+############################################################
+#
+# parse_client_difficulty(): the two ways a CryptoNote miner
+# asks for its own difficulty — a suffix on the login, a key
+# in the password — and everything that must NOT be read as
+# such a request.
+############################################################
+
 class TestParseClientDifficulty(unittest.TestCase):
 
 
@@ -453,8 +564,11 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # "worker+DIFF" in the login: suffix stripped from the
-    # worker name, difficulty extracted.
+    # test_login_suffix
+    ############################################################
+    #
+    # A difficulty appended to the login after a plus sign is
+    # stripped from the worker name and taken as the request.
     ############################################################
 
     def test_login_suffix(self):
@@ -466,7 +580,11 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # "d=DIFF" in the password field.
+    # test_password_d
+    ############################################################
+    #
+    # A difficulty in the password field, under the short
+    # key d.
     ############################################################
 
     def test_password_d(self):
@@ -478,7 +596,10 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # The long "diff=DIFF" keyword works too.
+    # test_password_diff_keyword
+    ############################################################
+    #
+    # The long key, diff, works too.
     ############################################################
 
     def test_password_diff_keyword(self):
@@ -490,6 +611,9 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
+    # test_login_suffix_wins_over_password
+    ############################################################
+    #
     # When both forms appear, the login suffix wins.
     ############################################################
 
@@ -502,8 +626,12 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # A non-numeric "+suffix" is part of the worker name, not
-    # a difficulty request — it must survive untouched.
+    # test_non_numeric_suffix_kept_in_name
+    ############################################################
+    #
+    # A plus-sign suffix that is not a number is part of the
+    # worker name, not a difficulty request — it must survive
+    # untouched.
     ############################################################
 
     def test_non_numeric_suffix_kept_in_name(self):
@@ -515,7 +643,11 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # Plain login + meaningless password: no request.
+    # test_no_request
+    ############################################################
+    #
+    # A plain login and a password that says nothing about
+    # difficulty make no request.
     ############################################################
 
     def test_no_request(self):
@@ -527,8 +659,11 @@ class TestParseClientDifficulty(unittest.TestCase):
 
 
     ############################################################
-    # "+0" is not a usable difficulty; treated as part of the
-    # name rather than granting difficulty 0.
+    # test_zero_rejected
+    ############################################################
+    #
+    # A zero suffix is no usable difficulty: it stays part of
+    # the name rather than granting difficulty 0.
     ############################################################
 
     def test_zero_rejected(self):

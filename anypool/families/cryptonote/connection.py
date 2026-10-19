@@ -9,8 +9,9 @@
 #                 worker name for this solo pool); we reply
 #                 with a session id and its first job
 #    getjob     — explicit request for fresh work
-#    submit     — one share: {id, job_id, nonce, result};
-#                 forwarded to CnStratumServer.process_share()
+#    submit     — one share: the session id, job_id, nonce
+#                 and claimed result; forwarded to
+#                 CnStratumServer.process_share()
 #    keepalived — heartbeat, answered with KEEPALIVED
 #
 #  Unlike the Bitcoin dialect there are no difficulty or
@@ -20,13 +21,11 @@
 #
 #  Per-connection difficulty (the CryptoNote convention for
 #  what Bitcoin miners do via mining.suggest_difficulty): a
-#  miner may request its own difficulty with either
-#
-#      login:    "workername+25000"
-#      password: "d=25000"
-#
-#  so one pool port can serve a CPU and a rented rig at once.
-#  The request is clamped by the server (see
+#  miner may request its own difficulty by ending its login
+#  with a plus sign and the number, or with a "d" or "diff"
+#  entry in its comma-separated password — so one pool port
+#  can serve a CPU and a rented rig at once. The request is
+#  clamped by the server (see
 #  CnStratumServer.effective_difficulty).
 #
 #  Framing and connection lifecycle live in the shared base
@@ -58,9 +57,9 @@ from anypool.stratum.base import BaseStratumConnection
 # _is_hex
 ############################################################
 #
-# True for a non-empty pure-hex string. int(s, 16) is not
-# enough for wire input — it tolerates "0x" prefixes,
-# underscores and surrounding whitespace.
+# True for a non-empty pure-hex string. Parsing with int()
+# in base 16 is not enough for wire input — it tolerates a
+# 0x prefix, underscores and surrounding whitespace.
 #
 # Used by:
 #   - CnConnection.handle_submit() — nonce/result shape gates
@@ -82,10 +81,14 @@ def _is_hex(s: str) -> bool:
 #
 # Extracts a requested per-connection difficulty from the
 # login parameters, following the conventions CryptoNote
-# miners expect ("worker+DIFF" in the login, or "d=DIFF" in
-# the password — XMRig users pass either). Returns
-# (worker_name_without_suffix, difficulty_or_None); anything
-# unparsable degrades gracefully to no request.
+# miners expect — XMRig users pass either: a plus sign and
+# the number at the end of the login, or a "d" or "diff"
+# entry among the comma-separated parts of the password.
+# The login suffix wins when both are present. Returns the
+# worker name without the suffix, and the difficulty or
+# None. A suffix that is no positive number stays part of
+# the worker name, and an unusable password entry is just
+# no request (but see the isdigit() note in the body).
 #
 # Used by:
 #   - CnConnection.handle_login()
@@ -98,6 +101,12 @@ def parse_client_difficulty(login: str, password: str):
 
     if "+" in login:
         login, _, suffix = login.rpartition("+")
+        # BUG (documented, not fixed): isdigit() also accepts
+        # Unicode digits that int() refuses, superscripts among
+        # them, so such a suffix — or such a password value
+        # below — raises ValueError instead of degrading to no
+        # request; process_message() only logs it and the login
+        # goes unanswered.
         if suffix.isdigit() and int(suffix) >= 1:
             requested = int(suffix)
         else:
@@ -118,6 +127,29 @@ def parse_client_difficulty(login: str, password: str):
 
 
 
+
+############################################################
+# CnConnection
+############################################################
+#
+# One connected CryptoNote miner. The socket loop, framing
+# and cleanup come from BaseStratumConnection; this class
+# is the dialect on top — login, getjob, submit and
+# keepalived, answered in the JSON-RPC 2.0 envelope — plus
+# the state a CryptoNote session needs: the session id the
+# miner must echo on every submit, its own extranonce, and
+# the difficulty it asked for. Every job it receives is cut
+# for this connection alone, so the server pushes work by
+# asking each connection for a fresh job instead of sending
+# one shared frame to all.
+#
+# Used by:
+#   - handle_client() (below) — one instance per accepted
+#     TCP connection
+#   - families/cryptonote/server.py — broadcast_new_jobs()
+#     pushes work through push_job(); process_share() checks
+#     a job's owner against it
+############################################################
 
 class CnConnection(BaseStratumConnection):
 
@@ -163,8 +195,8 @@ class CnConnection(BaseStratumConnection):
     ############################################################
     #
     # CryptoNote miners expect the full JSON-RPC 2.0 envelope
-    # in responses ("jsonrpc": "2.0"), so this overrides the
-    # base's bare {id, result, error} shape.
+    # in responses, version field included, so this overrides
+    # the base's bare id/result/error shape.
     #
     # Used by:
     #   - the handlers below
@@ -205,6 +237,13 @@ class CnConnection(BaseStratumConnection):
             "job_id": job["job_id"],
             "target": job["target"],
             "height": job["height"],
+            # LATENT BUG (documented, not fixed): fixed at cn/0
+            # instead of following the coin's cn_variant, which
+            # coins/base.py says also names the algo for XMRig.
+            # Right for LTL, the only CryptoNote coin today; a
+            # coin on another variant would be told the wrong
+            # algorithm and every share would fail the result
+            # check in process_share().
             "algo": "cn/0",
             "id": self.session_id,
         }
@@ -242,8 +281,11 @@ class CnConnection(BaseStratumConnection):
     # process_message
     ############################################################
     #
-    # Routes one parsed message to its handler. Every request
-    # gets SOME answer — an unanswered id stalls miners.
+    # Routes one parsed message to its handler. An unknown
+    # method that carries an id is refused with an error
+    # rather than ignored, since an unanswered id stalls
+    # miners. A handler that raises is only logged, though —
+    # that request then goes unanswered.
     #
     # Used by:
     #   - stratum/base.py — BaseStratumConnection.handle()
@@ -352,8 +394,9 @@ class CnConnection(BaseStratumConnection):
     # handle_submit
     ############################################################
     #
-    # Receives one share: {"id": session, "job_id": ...,
-    # "nonce": 8 hex chars, "result": 64-hex PoW hash}. The
+    # Receives one share: the session id handed out at login,
+    # the job_id, the nonce (8 hex chars) and the miner's
+    # claimed result (the PoW hash, 64 hex chars). The
     # verdict comes from the server; rejections carry the
     # conventional message strings miners parse (see
     # errors.py).
@@ -409,7 +452,8 @@ class CnConnection(BaseStratumConnection):
 # disconnect.
 #
 # Used by:
-#   - families/cryptonote/runner.py — asyncio.start_server(...)
+#   - families/cryptonote/runner.py — run(), as the connection
+#     callback it hands to asyncio.start_server
 ############################################################
 
 async def handle_client(reader, writer, server):

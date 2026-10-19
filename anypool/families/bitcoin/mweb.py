@@ -23,7 +23,7 @@
 #  announces each change of its state, with the height of the
 #  first MWEB block once the node's report allows it. When
 #  getblocktemplate fails it checks whether this is that
-#  stall; if so it explains the remedy (again every few
+#  stall; if so it explains the remedy (again every ten
 #  minutes while the chain stays stuck) and, when the active
 #  coin's MWEB peg-in settings name an amount
 #  (MWEB_PEGIN_AMOUNT), sends the peg-in itself from the
@@ -78,6 +78,8 @@ STALL_REMINDER_SECONDS = 600
 # Used by:
 #   - MwebWatch.observe() and MwebWatch.diagnose() (below)
 #   - tests/test_mweb.py
+#   - tests/integration_mweb_regtest.py — the regtest chain's
+#     MWEB state
 ############################################################
 
 def deployment_state(chain_info: Optional[Dict], name: str = "mweb") -> Optional[Dict]:
@@ -268,6 +270,27 @@ def active_pegin() -> MwebPegin:
 
 
 
+############################################################
+# MwebWatch
+############################################################
+#
+# The MWEB side of one pool process. It is an object rather
+# than a set of functions because both of its jobs need
+# memory between template polls: reporting the deployment's
+# progress means knowing what was announced last (and the
+# signalling period, which the node stops reporting once
+# signalling ends), and handling the first-MWEB-block stall
+# means knowing the stuck tip, when the stall was last
+# explained and which peg-in was already tried for it — so
+# the log reports each change once, and one stuck tip never
+# gets a second peg-in sent.
+#
+# Used by:
+#   - families/bitcoin/server.py — StratumServer owns one for
+#     coins with has_mweb: create_job() runs observe(),
+#     _fetch_template() runs diagnose()
+############################################################
+
 class MwebWatch:
 
 
@@ -280,7 +303,8 @@ class MwebWatch:
     ############################################################
     #
     # Nothing seen yet: no deployment status announced, no
-    # signalling period known, no stuck tip, no peg-in attempt.
+    # signalling period known, no stuck tip, no stall
+    # explained, no peg-in attempt.
     #
     # Used by:
     #   - families/bitcoin/server.py — StratumServer.__init__()

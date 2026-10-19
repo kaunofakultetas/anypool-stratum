@@ -34,6 +34,26 @@ from anypool import config
 
 
 
+############################################################
+# BaseStratumConnection
+############################################################
+#
+# One miner's TCP connection with the dialect left out. It
+# holds the stream pair, the identity fields the display
+# panels read (client_ip, worker_name, miner_software) and
+# the authorized flag the dialects gate on; it runs the read
+# loop that turns newline-framed JSON into process_message()
+# calls and writes every outgoing frame through
+# send_message(). A subclass adds only its dialect's state
+# and its process_message() — the loop, the framing and the
+# cleanup on disconnect exist once, here, so both families
+# behave the same on the wire.
+#
+# Used by:
+#   - families/bitcoin/connection.py    — StratumConnection
+#   - families/cryptonote/connection.py — CnConnection
+############################################################
+
 class BaseStratumConnection:
 
 
@@ -50,7 +70,8 @@ class BaseStratumConnection:
     # to the subclass __init__.
     #
     # Used by:
-    #   - family connection subclasses
+    #   - families/bitcoin/connection.py    — StratumConnection.__init__()
+    #   - families/cryptonote/connection.py — CnConnection.__init__()
     ############################################################
 
     def __init__(self, reader, writer, server):
@@ -81,7 +102,8 @@ class BaseStratumConnection:
     # socket is closed.
     #
     # Used by:
-    #   - family connection modules — handle_client()
+    #   - families/bitcoin/connection.py    — handle_client()
+    #   - families/cryptonote/connection.py — handle_client()
     ############################################################
 
     async def handle(self):
@@ -164,11 +186,13 @@ class BaseStratumConnection:
     # send_response
     ############################################################
     #
-    # A JSON-RPC response to a request id the miner sent.
+    # A JSON-RPC response to a request id the miner sent, in
+    # the bare id/result/error shape Bitcoin miners expect.
+    # CnConnection overrides it: CryptoNote miners want the
+    # full JSON-RPC 2.0 envelope.
     #
     # Used by:
-    #   - families/bitcoin/connection.py    — every handler
-    #   - families/cryptonote/connection.py — every handler
+    #   - families/bitcoin/connection.py — every handler
     ############################################################
 
     async def send_response(self, message_id, result=None, error=None):
@@ -211,8 +235,8 @@ class BaseStratumConnection:
     #
     # Used by:
     #   - send_response / send_notification (above)
-    #   - families/cryptonote/connection.py — login result
-    #     and pushed job frames
+    #   - families/cryptonote/connection.py — CnConnection's
+    #     send_response() override and push_job()
     ############################################################
 
     async def send_message(self, message):
@@ -233,6 +257,23 @@ class BaseStratumConnection:
 
 
 
+############################################################
+# BasePoolServer
+############################################################
+#
+# The family-neutral half of a pool server: the set of
+# connected clients every broadcast goes to, the lifetime
+# share and block counters, and the strong references that
+# keep fire-and-forget background tasks alive. Job state,
+# node access and share judgment differ per family and live
+# in the subclasses; connections join and leave the
+# registry through add_client() and remove_client().
+#
+# Used by:
+#   - families/bitcoin/server.py    — StratumServer
+#   - families/cryptonote/server.py — CnStratumServer
+############################################################
+
 class BasePoolServer:
 
 
@@ -248,7 +289,8 @@ class BasePoolServer:
     # task bookkeeping shared by every family server.
     #
     # Used by:
-    #   - family server subclasses (super().__init__())
+    #   - families/bitcoin/server.py    — StratumServer.__init__()
+    #   - families/cryptonote/server.py — CnStratumServer.__init__()
     ############################################################
 
     def __init__(self):
@@ -301,7 +343,10 @@ class BasePoolServer:
     #
     # Used by:
     #   - BaseStratumConnection.handle() — cleanup
-    #   - family servers — when a broadcast send fails
+    #   - families/bitcoin/server.py    — broadcast_new_job(),
+    #     when a send fails
+    #   - families/cryptonote/server.py — broadcast_new_jobs(),
+    #     when a send fails
     ############################################################
 
     def remove_client(self, client) -> None:
@@ -323,7 +368,10 @@ class BasePoolServer:
     # be garbage-collected mid-flight.
     #
     # Used by:
-    #   - family servers — job broadcasts, block submissions
+    #   - families/bitcoin/server.py    — create_job() (job
+    #     broadcast, MWEB watch), _start_block_submission()
+    #   - families/cryptonote/server.py — create_job() (job
+    #     broadcast), _start_block_submission()
     ############################################################
 
     def _spawn(self, coro) -> asyncio.Task:
@@ -346,7 +394,10 @@ class BasePoolServer:
     # accepted (that is the moment blocks_found moves).
     #
     # Used by:
-    #   - family servers — process_share(), submission tasks
+    #   - families/bitcoin/server.py    — process_share(),
+    #     _submit_block_task()
+    #   - families/cryptonote/server.py — process_share(),
+    #     _submit_block_task()
     ############################################################
 
     def _print_stats(self) -> None:

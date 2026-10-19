@@ -2,10 +2,10 @@
 #  [*] Coinbase Transaction Builder
 #
 #  Builds the coinbase transaction for a block template and
-#  splits it into the two halves the stratum protocol needs:
-#
-#      coinb1 + extranonce1 + extranonce2 + coinb2
-#           \_________ miner fills _________/
+#  splits it into the two halves the stratum protocol needs.
+#  A miner rebuilds the whole transaction by joining coinb1,
+#  the extranonce1 the pool assigned it, the extranonce2 it
+#  picks itself and coinb2, in that order.
 #
 #  The split point sits inside the scriptSig, right after the
 #  BIP34 height push, so every miner connection produces a
@@ -21,7 +21,10 @@
 #             actual block we submit to the node.
 #
 #  Used by:
-#    - families/bitcoin/jobs.py — build_job() calls build_coinbase_parts()
+#    - families/bitcoin/jobs.py   — build_job() calls
+#      build_coinbase_parts()
+#    - families/bitcoin/blocks.py — to_varint() for the
+#      block's transaction count
 ############################################################
 
 
@@ -75,7 +78,14 @@ def to_varint(i: int) -> str:
 # coinbase scriptSig. Encodes the height with Bitcoin Core's
 # CScriptNum rules (minimal little-endian with a sign-bit
 # padding byte when the top bit is set) and prefixes the
-# push-length byte. Compatible with all Bitcoin-based coins.
+# push-length byte.
+#
+# Heights 1 to 16 are a known gap: Bitcoin Core's BIP34
+# check expects them as the small-number opcodes OP_1 to
+# OP_16, while this pushes them as one data byte, so a block
+# at those heights is refused (bad-cb-height) on a chain
+# that already enforces BIP34 there — a fresh regtest chain
+# can. Chains past height 16 never meet it.
 #
 # Used by:
 #   - build_coinbase_parts() (below)
@@ -114,12 +124,9 @@ def bip34_height_push(height: int) -> bytes:
 ############################################################
 #
 # Assembles the coinbase transaction for a getblocktemplate
-# result and returns its stratum halves:
-#
-#   {
-#     "coinb1_txid": ...,  "coinb2_txid": ...,   # no witness
-#     "coinb1_full": ...,  "coinb2_full": ...,   # with witness
-#   }
+# result and returns its stratum halves: coinb1_txid and
+# coinb2_txid without witness data, coinb1_full and
+# coinb2_full with it.
 #
 # Layout of the transaction (hex, in order):
 #
@@ -140,7 +147,10 @@ def bip34_height_push(height: int) -> bytes:
 ############################################################
 
 def build_coinbase_parts(template: Dict) -> Dict[str, str]:
-
+    # STEP 1: the inputs — height, reward, the pool's message,
+    # and whether the block is segwit (the template then
+    # carries a witness commitment)
+    # ========================================================
     height = int(template["height"])
     coinbase_value = int(template["coinbasevalue"])
     message_bytes = config.COINBASE_MESSAGE.encode('utf-8')
@@ -149,7 +159,8 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
     has_witness = witness_commitment_hex is not None
 
 
-    # Fixed fields of a coinbase transaction
+    # STEP 2: fixed fields of a coinbase transaction
+    # ==============================================
     version_le = "01000000"
     input_count = "01"
     prevout_hash = "00" * 32     # Coinbase spends nothing
@@ -158,15 +169,21 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
     locktime = "00000000"
 
 
-    # scriptSig = height push + extranonce1 (4b) + extranonce2 (4b) + message
+    # STEP 3: the scriptSig — height push, room for extranonce1
+    # and extranonce2 (4 bytes each), then the message. Nothing
+    # checks the consensus limit of 100 scriptSig bytes: a
+    # COINBASE_MESSAGE over about 88 bytes makes every block
+    # invalid (bad-cb-length) while shares keep being accepted.
+    # =========================================================
     height_push = bip34_height_push(height)
     scriptsig_len = len(height_push) + 4 + 4 + len(message_bytes)
     scriptsig_len_vi = to_varint(scriptsig_len)
 
 
-    # Output 0: full block reward to the pool's payout address.
-    # The script format (P2WPKH vs legacy P2PKH) is decided by
-    # the active coin's address scheme.
+    # STEP 4: output 0 — the full block reward to the pool's
+    # payout address. The script format (P2WPKH vs legacy
+    # P2PKH) is decided by the active coin's address scheme.
+    # ======================================================
     outputs = []
     payout_script = coins.active().address_scheme.payout_script(config.REWARD_ADDR, config.COIN_NETWORK)
     payout_output = (
@@ -177,7 +194,9 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
     outputs.append(payout_output)
 
 
-    # Output 1: witness commitment (zero value) — required for segwit blocks
+    # STEP 5: output 1 — the witness commitment (zero value),
+    # required for segwit blocks
+    # =======================================================
     if witness_commitment_hex:
         witness_output = (
             "0000000000000000" +
@@ -189,8 +208,10 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
     output_count_vi = to_varint(len(outputs))
 
 
-    # TXID serialization (always without witness data) — this is
-    # what miners hash and what goes into the merkle tree.
+    # STEP 6: TXID serialization (always without witness data)
+    # — this is what miners hash and what goes into the merkle
+    # tree.
+    # ========================================================
     coinb1_txid = version_le + input_count + prevout_hash + prevout_index + scriptsig_len_vi + height_push.hex()
     coinb2_txid = (
         message_bytes.hex() +
@@ -201,9 +222,11 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
     )
 
 
-    # Full serialization — identical unless the block is segwit,
-    # in which case the marker/flag bytes ("00" "01") and the
-    # witness reserved value are added for block submission.
+    # STEP 7: full serialization — identical unless the block
+    # is segwit, in which case the marker/flag bytes ("00"
+    # "01") and the witness reserved value are added for block
+    # submission.
+    # ========================================================
     if has_witness:
         coinb1_full = version_le + "00" + "01" + input_count + prevout_hash + prevout_index + scriptsig_len_vi + height_push.hex()
         coinb2_full = (

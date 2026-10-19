@@ -2,7 +2,7 @@
 #  [*] CryptoNote Stratum Error Messages
 #
 #  The CryptoNote dialect reports share rejections as a
-#  JSON-RPC error object {"code": -1, "message": ...} whose
+#  JSON-RPC error object with code -1 and a message, and the
 #  MESSAGE STRING is what miners parse — XMRig prints it
 #  verbatim and has special handling for the conventional
 #  ones below ("Block expired" and "Low difficulty share"
@@ -35,11 +35,14 @@ ERROR_LOW_DIFFICULTY = "Low difficulty share"
 # as_rpc_error
 ############################################################
 #
-# Wraps a message in the error object shape the dialect
-# expects on the wire.
+# Wraps a message in the error object the dialect expects
+# on the wire: code -1, with the message beside it. The code
+# is always the same — miners tell errors apart by message.
 #
 # Used by:
-#   - families/cryptonote/connection.py
+#   - families/cryptonote/connection.py — every error reply
+#     (unknown method, no work yet, unauthenticated, share
+#     rejections)
 ############################################################
 
 def as_rpc_error(message: str) -> dict:

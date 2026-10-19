@@ -1,12 +1,18 @@
 ############################################################
 #  [*] Tests — Block Header Round-Trip
 #
-#  Covers families/bitcoin/shares.py. The end-to-end assertion of the
-#  whole suite: given the job fields and the exact nonces the
-#  ASIC submitted for KNF block 1777, build_header() must
-#  reproduce the accepted block's 80-byte header, its Scrypt
-#  PoW hash, and that hash must sit below both targets — the
-#  full share-validation path in one test.
+#  Covers families/bitcoin/shares.py. The end-to-end
+#  assertion of the whole suite: given the job fields and
+#  the exact nonces the ASIC submitted for KNF block 1777,
+#  build_header() must reproduce the accepted block's 80-byte
+#  header and its Scrypt PoW hash, and that hash must meet
+#  both targets — the full share-validation path, end to end.
+#
+#  Around it, what a share must pass before any hashing —
+#  the shape of the mining.submit parameters, the
+#  version-rolling bits it may carry, the window its ntime
+#  must stay in — and how rolled bits enter the header
+#  version.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -38,10 +44,11 @@ from tests import vectors
 ############################################################
 #
 # The job dict for block 1777, reassembled from the captured
-# log values (only the fields build_header() reads).
+# log values: the fields build_header() reads, plus the
+# job's own ntime, which it ignores in favor of the share's.
 #
 # Used by:
-#   - tests/test_header.py — the test cases below
+#   - TestBuildHeader (below) — every test case
 ############################################################
 
 def block_1777_job():
@@ -62,6 +69,15 @@ def block_1777_job():
 
 
 
+############################################################
+# TestBuildHeader
+############################################################
+#
+# build_header() replaying the share that became block 1777:
+# the header and Scrypt hash it must rebuild, and what any
+# other nonce makes of them.
+############################################################
+
 class TestBuildHeader(unittest.TestCase):
 
 
@@ -70,6 +86,9 @@ class TestBuildHeader(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_round_trip
+    ############################################################
+    #
     # The winning share must rebuild the exact header and PoW
     # hash the network accepted.
     ############################################################
@@ -91,6 +110,9 @@ class TestBuildHeader(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_meets_targets
+    ############################################################
+    #
     # The same PoW hash must pass both the pool and network
     # target comparisons — this share WAS a block.
     ############################################################
@@ -112,8 +134,11 @@ class TestBuildHeader(unittest.TestCase):
 
 
     ############################################################
+    # test_wrong_nonce_fails_targets
+    ############################################################
+    #
     # Any different nonce must produce a different header and
-    # (astronomically certain) fail the targets.
+    # — all but certainly — miss the network target.
     ############################################################
 
     def test_wrong_nonce_fails_targets(self):
@@ -133,6 +158,16 @@ class TestBuildHeader(unittest.TestCase):
 
 
 
+############################################################
+# TestValidateShareParams
+############################################################
+#
+# What a mining.submit may carry: the parameter lists that
+# pass the shape check before any hashing, and the optional
+# version-rolling bits — the mask they must stay inside and
+# how they enter the header version.
+############################################################
+
 class TestValidateShareParams(unittest.TestCase):
 
 
@@ -141,7 +176,11 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
-    # The exact parameter list cgminer submitted for the block.
+    # test_real_submission_accepted
+    ############################################################
+    #
+    # The exact parameter list cgminer submitted for block
+    # 1777 must pass.
     ############################################################
 
     def test_real_submission_accepted(self):
@@ -155,6 +194,9 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
+    # test_malformed_submissions_rejected
+    ############################################################
+    #
     # Wrong arity, non-hex values and wrong field widths must
     # all be rejected before any hashing happens.
     ############################################################
@@ -173,6 +215,9 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
+    # test_six_param_submission_accepted
+    ############################################################
+    #
     # Some ASIC firmwares (e.g. NexusL1/BM1491) append a 6th
     # parameter — the BIP310 version-rolling bits — and a pool
     # that rejects on arity alone kicks every such firmware
@@ -194,6 +239,9 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
+    # test_six_param_submission_with_garbage_bits_rejected
+    ############################################################
+    #
     # The 6th parameter, when present, must itself be 4-byte
     # hex — anything else fails the shape gate.
     ############################################################
@@ -209,6 +257,9 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
+    # test_seven_param_submission_rejected
+    ############################################################
+    #
     # Seven parameters is not a known submission shape from
     # any firmware — rejected.
     ############################################################
@@ -223,6 +274,9 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
+    # test_version_bits_against_mask
+    ############################################################
+    #
     # Version-rolling policy: bits must stay inside the mask the
     # connection negotiated. Mask 0 (never negotiated / coin
     # forbids rolling) only lets all-zero bits through.
@@ -245,8 +299,12 @@ class TestValidateShareParams(unittest.TestCase):
 
 
     ############################################################
+    # test_rolled_version
+    ############################################################
+    #
     # Rolling replaces ONLY the masked bits; everything else
-    # keeps the job's version. Zero bits + zero mask = identity.
+    # keeps the job's version. With zero bits and a zero mask
+    # it is the identity.
     ############################################################
 
     def test_rolled_version(self):
@@ -264,6 +322,15 @@ class TestValidateShareParams(unittest.TestCase):
 
 
 
+############################################################
+# TestNtimeWithinRange
+############################################################
+#
+# The window a miner may roll ntime within: from
+# NTIME_BACKWARD_SLACK seconds behind the job's ntime to
+# NTIME_FORWARD_SLACK seconds ahead of it.
+############################################################
+
 class TestNtimeWithinRange(unittest.TestCase):
 
 
@@ -272,6 +339,9 @@ class TestNtimeWithinRange(unittest.TestCase):
 
 
     ############################################################
+    # test_legitimate_ntime_accepted
+    ############################################################
+    #
     # The real share submitted ntime identical to the job ntime,
     # and small legitimate rolls must also pass.
     ############################################################
@@ -289,6 +359,9 @@ class TestNtimeWithinRange(unittest.TestCase):
 
 
     ############################################################
+    # test_window_edges
+    ############################################################
+    #
     # Exactly at the window edges is still allowed; one second
     # beyond either edge is rejected.
     ############################################################
@@ -308,6 +381,9 @@ class TestNtimeWithinRange(unittest.TestCase):
 
 
     ############################################################
+    # test_absurd_ntime_rejected
+    ############################################################
+    #
     # Absurd timestamps (zero, far future) must be rejected.
     ############################################################
 

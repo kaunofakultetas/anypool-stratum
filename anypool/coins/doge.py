@@ -3,18 +3,19 @@
 #
 #  An OLDER Bitcoin Core fork: Scrypt PoW like Litecoin, but
 #  no segwit, no MWEB, and legacy base58check addresses
-#  ("D..." on mainnet) — which makes it the reference
-#  definition for pre-segwit forks in general:
+#  (starting with D on mainnet) — which makes it the
+#  reference definition for pre-segwit forks in general:
 #
 #    - Base58P2PKH address scheme (P2PKH payout script)
 #    - empty gbt_rules (old daemons predate the rules param)
-#    - has_mweb=False (no extension tail in the block)
+#    - has_mweb off (no extension tail in the block)
 #
 #  NOTE: solo mining only. Dogecoin is usually merge-mined
 #  with Litecoin (AuxPoW); this pool mines standalone blocks,
 #  which the network also accepts. Version rolling must stay
-#  disabled: the header version bits encode the AuxPoW chain
-#  id, so they are not free for miners to flip.
+#  disabled (the definition leaves version_rolling_mask at
+#  its default of 0): the header version bits encode the
+#  AuxPoW chain id, so they are not free for miners to flip.
 #
 #  Validated against a live node (testnet, dogecoind 1.14.7).
 #

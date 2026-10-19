@@ -41,7 +41,8 @@ from tests import mweb_vectors, vectors
 # assembled block hex.
 #
 # Used by:
-#   - tests/test_blocks.py — TestMwebBlocks (below)
+#   - TestMwebBlocks (below) — its three byte-exact test
+#     cases
 ############################################################
 
 def rebuild(vector):
@@ -58,6 +59,16 @@ def rebuild(vector):
 
 
 
+############################################################
+# TestAssembleBlock
+############################################################
+#
+# The serialized block around a solved header — its layout,
+# the template transactions and their count — built from
+# block 1777's job, with synthetic transactions where that
+# coinbase-only block has none to show.
+############################################################
+
 class TestAssembleBlock(unittest.TestCase):
 
 
@@ -66,12 +77,16 @@ class TestAssembleBlock(unittest.TestCase):
 
 
     ############################################################
-    # Block 1777 layout: header + tx count 01 + full (witness)
-    # coinbase with the miner's extranonces, and nothing after
-    # it. The network accepted 1777 with a lone MWEB marker
-    # byte appended, which its node never read; a block before
-    # MWEB ends after its last transaction (see TestMwebBlocks
-    # for a node accepting exactly that).
+    # test_block_1777_layout
+    ############################################################
+    #
+    # Block 1777 layout: the header, a transaction count of
+    # one and the full (witness) coinbase with the miner's
+    # extranonces, and nothing after it. The network accepted
+    # 1777 with a lone MWEB marker byte appended, which its
+    # node never read; a block before MWEB ends after its last
+    # transaction (see TestMwebBlocks for a node accepting
+    # exactly that).
     ############################################################
 
     def test_block_1777_layout(self):
@@ -92,6 +107,9 @@ class TestAssembleBlock(unittest.TestCase):
 
 
     ############################################################
+    # test_transactions_appended
+    ############################################################
+    #
     # Template transactions must be appended verbatim, and the
     # tx count must include the coinbase.
     ############################################################
@@ -117,6 +135,9 @@ class TestAssembleBlock(unittest.TestCase):
 
 
     ############################################################
+    # test_varint_tx_count_above_252
+    ############################################################
+    #
     # Above 252 transactions the count must switch to the "fd"
     # varint form — a single count byte would serialize a
     # corrupt block here.
@@ -141,6 +162,16 @@ class TestAssembleBlock(unittest.TestCase):
 
 
 
+############################################################
+# TestMwebBlocks
+############################################################
+#
+# The MWEB section: real regtest blocks from both sides of
+# MWEB's activation rebuilt byte for byte, and the two
+# template shapes that must not yield a section — MWEB data
+# with no HogEx in front of it, and an empty mweb field.
+############################################################
+
 class TestMwebBlocks(unittest.TestCase):
 
 
@@ -149,6 +180,9 @@ class TestMwebBlocks(unittest.TestCase):
 
 
     ############################################################
+    # test_block_before_mweb_is_byte_exact
+    ############################################################
+    #
     # The block before MWEB: rebuilt from its template and
     # share it is the block the node accepted — ending right
     # after the coinbase, with no MWEB marker.
@@ -169,6 +203,9 @@ class TestMwebBlocks(unittest.TestCase):
 
 
     ############################################################
+    # test_first_mweb_block_is_byte_exact
+    ############################################################
+    #
     # The first MWEB block: coinbase, the peg-in, the HogEx,
     # then the marker and the template's MWEB data — the exact
     # bytes the node accepted.
@@ -193,6 +230,9 @@ class TestMwebBlocks(unittest.TestCase):
 
 
     ############################################################
+    # test_next_mweb_block_is_byte_exact
+    ############################################################
+    #
     # The next MWEB block: its HogEx spends the previous one,
     # no peg-in needed — again exactly the accepted bytes.
     ############################################################
@@ -212,6 +252,9 @@ class TestMwebBlocks(unittest.TestCase):
 
 
     ############################################################
+    # test_mweb_data_without_a_hogex_is_refused
+    ############################################################
+    #
     # MWEB data with no template transaction to be its HogEx
     # describes a block no node would accept: refused here
     # rather than serialized.
@@ -230,6 +273,9 @@ class TestMwebBlocks(unittest.TestCase):
 
 
     ############################################################
+    # test_empty_mweb_data_writes_no_section
+    ############################################################
+    #
     # An empty "mweb" field is no MWEB data: the block ends
     # after its transactions, without a marker.
     ############################################################

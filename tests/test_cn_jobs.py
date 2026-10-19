@@ -28,11 +28,14 @@ from tests import cn_vectors
 ############################################################
 #
 # The daemon's getblocktemplate answer for the captured
-# TEMPLATE_BLOB vector; prev_hash/height overrides simulate
-# tip movement.
+# TEMPLATE_BLOB vector; a prev_hash or height override
+# simulates tip movement. Only the prev_hash one is used at
+# the moment — no test moves the height.
 #
 # Used by:
-#   - the test cases below
+#   - TestTemplateTracking and TestPruning (below) — every
+#     test case
+#   - TestJobCutting.setUp and TestNonceGuard.setUp (below)
 ############################################################
 
 def template_result(prev_hash=None, height=None):
@@ -51,6 +54,15 @@ def template_result(prev_hash=None, height=None):
 
 
 
+############################################################
+# TestTemplateTracking
+############################################################
+#
+# set_template(): telling new work — a template on a
+# different parent — from a mere re-fetch of the same one,
+# which decides whether miners get a broadcast.
+############################################################
+
 class TestTemplateTracking(unittest.TestCase):
 
 
@@ -59,6 +71,9 @@ class TestTemplateTracking(unittest.TestCase):
 
 
     ############################################################
+    # test_first_template_is_new_work
+    ############################################################
+    #
     # The very first template is always new work.
     ############################################################
 
@@ -72,6 +87,9 @@ class TestTemplateTracking(unittest.TestCase):
 
 
     ############################################################
+    # test_same_parent_is_not_new_work
+    ############################################################
+    #
     # A re-fetched template on the same parent is NOT new work
     # — the refresh loop must not trigger broadcasts for it.
     ############################################################
@@ -87,6 +105,9 @@ class TestTemplateTracking(unittest.TestCase):
 
 
     ############################################################
+    # test_new_parent_is_new_work
+    ############################################################
+    #
     # A template on a different parent means the tip moved:
     # new work.
     ############################################################
@@ -103,6 +124,16 @@ class TestTemplateTracking(unittest.TestCase):
 
 
 
+############################################################
+# TestJobCutting
+############################################################
+#
+# make_job(): one personalized job per client from the
+# stored template — unique work, everything share
+# validation needs, and the difficulty snapshot the share
+# is later judged by.
+############################################################
+
 class TestJobCutting(unittest.TestCase):
 
 
@@ -111,6 +142,9 @@ class TestJobCutting(unittest.TestCase):
 
 
     ############################################################
+    # setUp
+    ############################################################
+    #
     # Every test cuts jobs from one freshly stored template.
     ############################################################
 
@@ -124,6 +158,9 @@ class TestJobCutting(unittest.TestCase):
 
 
     ############################################################
+    # test_clients_get_distinct_blobs
+    ############################################################
+    #
     # The core property of the family: two clients mining the
     # same template must receive DIFFERENT blobs, or they
     # would duplicate each other's work.
@@ -142,6 +179,9 @@ class TestJobCutting(unittest.TestCase):
 
 
     ############################################################
+    # test_job_fields
+    ############################################################
+    #
     # One cut job carries everything share validation and the
     # wire payload need, straight from the template.
     ############################################################
@@ -162,6 +202,9 @@ class TestJobCutting(unittest.TestCase):
 
 
     ############################################################
+    # test_difficulty_snapshot
+    ############################################################
+    #
     # Difficulty is SNAPSHOTTED per job: a share arriving after
     # the pool difficulty changed is judged by what the miner
     # was actually given.
@@ -180,6 +223,9 @@ class TestJobCutting(unittest.TestCase):
 
 
     ############################################################
+    # test_make_job_without_template_raises
+    ############################################################
+    #
     # Cutting a job before any template exists is a bug in the
     # caller (login handles it) and must raise, not mint an
     # empty job.
@@ -196,6 +242,14 @@ class TestJobCutting(unittest.TestCase):
 
 
 
+############################################################
+# TestNonceGuard
+############################################################
+#
+# register_nonce(), the duplicate-share guard: a nonce
+# counts once per job, whatever its hex case.
+############################################################
+
 class TestNonceGuard(unittest.TestCase):
 
 
@@ -204,6 +258,9 @@ class TestNonceGuard(unittest.TestCase):
 
 
     ############################################################
+    # setUp
+    ############################################################
+    #
     # Every test guards nonces on one issued job.
     ############################################################
 
@@ -218,6 +275,9 @@ class TestNonceGuard(unittest.TestCase):
 
 
     ############################################################
+    # test_first_nonce_accepted_replay_rejected
+    ############################################################
+    #
     # First submission of a nonce registers; the replay is
     # refused.
     ############################################################
@@ -232,8 +292,11 @@ class TestNonceGuard(unittest.TestCase):
 
 
     ############################################################
-    # "ABCD1234" and "abcd1234" are the same nonce — hex case
-    # must not open a replay hole.
+    # test_case_insensitive
+    ############################################################
+    #
+    # A nonce sent again in the other hex case is the same
+    # nonce — hex case must not open a replay hole.
     ############################################################
 
     def test_case_insensitive(self):
@@ -246,6 +309,9 @@ class TestNonceGuard(unittest.TestCase):
 
 
     ############################################################
+    # test_different_nonces_both_accepted
+    ############################################################
+    #
     # Distinct nonces on the same job are distinct shares.
     ############################################################
 
@@ -260,6 +326,15 @@ class TestNonceGuard(unittest.TestCase):
 
 
 
+############################################################
+# TestPruning
+############################################################
+#
+# The bound on stored jobs: as new jobs are cut the oldest
+# are dropped, so memory stays flat while the job a miner
+# holds stays resolvable.
+############################################################
+
 class TestPruning(unittest.TestCase):
 
 
@@ -268,6 +343,9 @@ class TestPruning(unittest.TestCase):
 
 
     ############################################################
+    # test_jobs_are_pruned
+    ############################################################
+    #
     # Job storage is bounded: a long-running pool with many
     # clients must not grow forever.
     ############################################################
@@ -287,6 +365,9 @@ class TestPruning(unittest.TestCase):
 
 
     ############################################################
+    # test_recent_job_survives_pruning
+    ############################################################
+    #
     # Pruning drops the OLDEST jobs — the one just issued must
     # still be resolvable when its share comes back.
     ############################################################

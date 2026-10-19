@@ -7,13 +7,12 @@
 #  crypto/bech32.py: turning the pool's REWARD_ADDR into the
 #  P2PKH scriptPubKey that receives the block reward.
 #
-#  A base58check address is:
-#
-#      base58( version_byte + payload + sha256d-checksum[4] )
-#
-#  where the version byte identifies coin + network (e.g.
-#  0x1e -> Dogecoin mainnet "D...") and the payload is the
-#  20-byte hash160 of the public key.
+#  A base58check address is the base58 rendering of three
+#  parts in order: a version byte naming coin and network
+#  (Dogecoin's mainnet byte is why its addresses start with
+#  a D), the payload — the 20-byte hash160 of the public
+#  key — and a 4-byte checksum, the start of the double
+#  SHA256 of the two parts before it.
 #
 #  Used by:
 #    - coins/address.py — the Base58P2PKH address scheme
@@ -25,6 +24,9 @@ from typing import Tuple
 from anypool.crypto.hashing import sha256d
 
 
+# Bitcoin's base58 alphabet — no 0, O, I or l, the characters
+# people misread when copying an address by hand — and each
+# character's digit value
 BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 BASE58_INDEX = {c: i for i, c in enumerate(BASE58_ALPHABET)}
 
@@ -39,13 +41,13 @@ BASE58_INDEX = {c: i for i, c in enumerate(BASE58_ALPHABET)}
 # base58_decode
 ############################################################
 #
-# Raw base58 -> bytes. The string is interpreted as one big
-# base-58 number; each leading '1' character encodes one
+# Decodes raw base58 into bytes. The string is read as one
+# big base-58 number; each leading '1' character encodes one
 # leading zero byte (base58's quirk, since '1' is digit 0).
 # Raises ValueError on characters outside the alphabet.
 #
 # Used by:
-#   - crypto/base58.py — base58check_decode()
+#   - base58check_decode() (below)
 ############################################################
 
 def base58_decode(s: str) -> bytes:
@@ -72,12 +74,14 @@ def base58_decode(s: str) -> bytes:
 # base58check_decode
 ############################################################
 #
-# Validates the 4-byte double-SHA256 checksum and splits the
-# result into (version_byte, payload). Raises ValueError on
-# anything malformed — too short, bad checksum.
+# Decodes an address (surrounding whitespace ignored),
+# validates the 4-byte double-SHA256 checksum and returns the
+# version byte and the payload behind it. Raises ValueError
+# on anything malformed — a character outside the alphabet,
+# too short, bad checksum.
 #
 # Used by:
-#   - crypto/base58.py — p2pkh_script_for_address()
+#   - p2pkh_script_for_address() (below)
 ############################################################
 
 def base58check_decode(addr: str) -> Tuple[int, bytes]:
@@ -106,11 +110,9 @@ def base58check_decode(addr: str) -> Tuple[int, bytes]:
 #
 # The public entry point of this module: decodes a legacy
 # address, checks it belongs to the expected network (by its
-# version byte), and returns the P2PKH scriptPubKey hex:
-#
-#     76a914 + <20-byte pubkey hash> + 88ac
-#     ^^^^^^                          ^^^^
-#     OP_DUP OP_HASH160 push-20       OP_EQUALVERIFY OP_CHECKSIG
+# version byte), and returns the P2PKH scriptPubKey as hex —
+# OP_DUP, OP_HASH160 and a 20-byte push (76a914), the pubkey
+# hash, then OP_EQUALVERIFY and OP_CHECKSIG (88ac).
 #
 # Raises ValueError for a wrong-network address or a payload
 # that is not exactly 20 bytes.

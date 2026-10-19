@@ -23,8 +23,8 @@
 #  is the KNF mainnet node's report, read on the same day.
 #
 #  Used by:
-#    - tests/test_mweb.py, test_blocks.py, test_server.py,
-#      test_jobs.py
+#    - tests/test_mweb.py, test_mweb_activation.py,
+#      test_rpc.py, test_blocks.py, test_jobs.py
 ############################################################
 
 
@@ -127,7 +127,9 @@ SOFTFORK_KNF_MAINNET = {
     "active": False,
 }
 
-# The tip height the node reported with each answer above
+# The tip height the node reported with each answer above.
+# Nothing reads this table at the moment: the tests pass the
+# heights inline, next to the entry they belong to.
 CHAIN_HEIGHTS = {
     "defined": 0,
     "started": 150,
@@ -256,8 +258,9 @@ PEGIN_REFUSALS = {
 # Each block as the pool built it: the template the node
 # served, the share that solved it (extranonces, ntime,
 # nonce), the header and its scrypt hash, and the block hex
-# the node accepted. The peg-in the first MWEB block carries
-# is PEGIN_TXID.
+# the node accepted, with the block's hash — recorded for
+# reference, no test reads it. The peg-in the first MWEB
+# block carries is PEGIN_TXID.
 ############################################################
 
 # Block 201, before MWEB

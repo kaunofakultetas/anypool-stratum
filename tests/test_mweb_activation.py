@@ -49,16 +49,17 @@ FIRST_SHARE = {key: mv.FIRST_MWEB_BLOCK[key] for key in ("extranonce1", "extrano
 # stalled_server
 ############################################################
 #
-# A StratumServer on a FakeNodeRPC standing where the regtest
-# node stood in front of its first MWEB block: every template
-# refused with the node's real refusal, MWEB bound from the
-# next block, the tip without an MWEB section. A peg-in is
-# answered with the real peg-in's txid and — as on the real
-# node — turns the template the node serves into the first
-# MWEB block's.
+# A StratumServer (its startup output swallowed) on a
+# FakeNodeRPC standing where the regtest node stood in front
+# of its first MWEB block: every template refused with the
+# node's real refusal, MWEB bound from the next block, the
+# tip without an MWEB section. A peg-in is answered with the
+# real peg-in's txid and — as on the real node — turns the
+# template the node serves into the first MWEB block's.
 #
 # Used by:
-#   - tests/test_mweb_activation.py — the test cases below
+#   - every test case below, in TestFirstMwebBlockStall and
+#     TestDeploymentAnnouncements
 ############################################################
 
 def stalled_server():
@@ -96,7 +97,10 @@ def stalled_server():
 # printed.
 #
 # Used by:
-#   - tests/test_mweb_activation.py — the test cases below
+#   - TestFirstMwebBlockStall (below) — all but the block
+#     submission test, which drives create_job() itself to
+#     slip a share in before the drain
+#   - TestDeploymentAnnouncements (below)
 ############################################################
 
 async def create_job_printing(server):
@@ -113,6 +117,18 @@ async def create_job_printing(server):
 
 
 
+############################################################
+# TestFirstMwebBlockStall
+############################################################
+#
+# The server at the chain's first MWEB block, on a fake node
+# that refuses every template the way the real one did:
+# quiet while the stall lasts, unstuck by the configured
+# peg-in, the first MWEB block then submitted exactly as the
+# node accepted it — while any other template failure stays
+# a plain error.
+############################################################
+
 class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
@@ -121,6 +137,9 @@ class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_stall_hands_out_nothing_and_explains_once
+    ############################################################
+    #
     # No peg-in configured: every poll comes back empty, the
     # stall is explained once, and no "Failed to create job"
     # error repeats on each poll.
@@ -147,10 +166,17 @@ class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_peg_in_cuts_the_first_mweb_job
+    ############################################################
+    #
     # With MWEB_PEGIN_AMOUNT set the first poll pegs in and the
     # job comes from the template the node serves then: block
-    # 432 with the peg-in and the HogEx, whose txids are the
-    # merkle branch's siblings of the coinbase.
+    # 432 with the peg-in and the HogEx — the peg-in's txid
+    # the first step of the coinbase's merkle branch, the
+    # three transactions making it two steps long. The calls
+    # run in the recovery's order: the refused template, the
+    # watch's two reads, the two wallet calls of the peg-in,
+    # then the template again.
     ############################################################
 
     async def test_peg_in_cuts_the_first_mweb_job(self):
@@ -176,6 +202,9 @@ class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_first_mweb_share_submits_the_accepted_block
+    ############################################################
+    #
     # The share that solved the real first MWEB block becomes,
     # in the background, exactly the block the node accepted —
     # peg-in, HogEx and MWEB section included.
@@ -203,9 +232,12 @@ class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_other_template_failures_stay_errors
+    ############################################################
+    #
     # A template failure that is not the stall — here a node
-    # refusing before MWEB is anywhere near — is still an
-    # error line, and no peg-in is tried.
+    # still in its initial sync, with MWEB only locked in — is
+    # still an error line, and no peg-in is tried.
     ############################################################
 
     async def test_other_template_failures_stay_errors(self):
@@ -227,6 +259,9 @@ class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_coin_without_mweb_has_no_watch
+    ############################################################
+    #
     # A coin without MWEB has no watch: a refused template is
     # an error straight away, without asking the node about
     # deployments.
@@ -249,6 +284,15 @@ class TestFirstMwebBlockStall(unittest.IsolatedAsyncioTestCase):
 
 
 
+############################################################
+# TestDeploymentAnnouncements
+############################################################
+#
+# The deployment report riding along with new tips: the
+# server has its MWEB watch read the state after each one,
+# in the background, and the log hears only of changes.
+############################################################
+
 class TestDeploymentAnnouncements(unittest.IsolatedAsyncioTestCase):
 
 
@@ -257,6 +301,9 @@ class TestDeploymentAnnouncements(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_new_tips_announce_changes_only
+    ############################################################
+    #
     # Each new tip has the watch read the deployment state in
     # the background; it is announced on the first tip and
     # again only when it changes.

@@ -56,10 +56,14 @@ from tests import mweb_vectors as mv
 from tests.test_server import FakeNodeRPC
 
 
-# A wallet's fresh MWEB address, as getnewaddress hands it out
+# The fresh MWEB address the fake wallet's getnewaddress hands
+# out — not a real address, as nothing on a fake node checks
+# it (test_mweb_activation.py hands it out too)
 MWEB_ADDRESS = "tmweb1qq0anypooltestaddress"
 
-# The panel titles the operator watches for
+# The panel titles the operator watches for, worded as
+# display.py words them (test_mweb_activation.py checks the
+# stall title too)
 STALL_TITLE = "Mining stopped before the first MWEB block"
 PEGIN_SENT_TITLE = "MWEB peg-in sent"
 PEGIN_FAILED_TITLE = "MWEB peg-in failed"
@@ -75,12 +79,18 @@ PEGIN_FAILED_TITLE = "MWEB peg-in failed"
 # chain_info
 ############################################################
 #
-# A getblockchaininfo answer around one real mweb softfork
-# entry: the tip height and hash the node reported with it,
-# and the entry under softforks.
+# A getblockchaininfo answer built around one mweb softfork
+# entry: a regtest chain at the given tip height, with the
+# given tip hash — a filler hash when the test does not care
+# which block is the tip — and the entry under softforks.
 #
 # Used by:
-#   - the test cases below
+#   - stalled_node() (below)
+#   - TestDeploymentState, TestActivationHeight,
+#     TestFirstBlockPending, TestMwebWatchObserve and
+#     TestMwebWatchDiagnose (below)
+#   - tests/test_mweb_activation.py — stalled_server() and
+#     the test cases there
 ############################################################
 
 def chain_info(entry, blocks, tip_hash="ab" * 32):
@@ -99,11 +109,13 @@ def chain_info(entry, blocks, tip_hash="ab" * 32):
 #
 # A FakeNodeRPC standing where the regtest node stood in
 # front of its first MWEB block: MWEB applies to the next
-# block, the tip carries no MWEB section, and a peg-in comes
-# back with the real peg-in's txid.
+# block, the tip carries no MWEB section, getnewaddress
+# hands out MWEB_ADDRESS and a peg-in comes back with the
+# real peg-in's txid. Given a node, it lays the stall over
+# that one instead of a fresh FakeNodeRPC.
 #
 # Used by:
-#   - TestMwebWatchDiagnose (below)
+#   - TestSendPegin and TestMwebWatchDiagnose (below)
 ############################################################
 
 def stalled_node(node=None):
@@ -130,7 +142,7 @@ def stalled_node(node=None):
 # result together with everything it printed.
 #
 # Used by:
-#   - the MwebWatch test cases below
+#   - TestMwebWatchObserve and TestMwebWatchDiagnose (below)
 ############################################################
 
 async def printed(coro):
@@ -151,13 +163,14 @@ async def printed(coro):
 ############################################################
 #
 # The active coin — KNF, as tests/__init__.py pins it — with
-# the given MWEB peg-in settings in its definition, for one
-# test; the defaults are what a peg-in-enabled pool would
+# the given MWEB peg-in settings in its definition, patched
+# into the coin registry for as long as the returned context
+# is open; the defaults are what a peg-in-enabled pool would
 # run with.
 #
 # Used by:
-#   - the MwebWatch test cases below
-#   - tests/test_mweb_activation.py
+#   - TestMwebWatchObserve and TestMwebWatchDiagnose (below)
+#   - tests/test_mweb_activation.py — TestFirstMwebBlockStall
 ############################################################
 
 def pegin_settings(amount="1", wallet="pool", fee_rate="10"):
@@ -175,13 +188,15 @@ def pegin_settings(amount="1", wallet="pool", fee_rate="10"):
 # SlowWallet
 ############################################################
 #
-# A stalled FakeNodeRPC whose sendtoaddress holds until the
-# test opens `wallet_gate`, announcing through `at_wallet`
-# that a peg-in is in flight — the window in which a second
-# template poll must not send another one.
+# A FakeNodeRPC whose sendtoaddress holds until the test
+# opens `wallet_gate`, announcing through `at_wallet` that a
+# peg-in is in flight — the window in which a second
+# template poll must not send another one. stalled_node()
+# lays the stall over it.
 #
 # Used by:
-#   - TestMwebWatchDiagnose (below)
+#   - test_two_polls_at_once_send_one_peg_in (below, in
+#     TestMwebWatchDiagnose)
 ############################################################
 
 class SlowWallet(FakeNodeRPC):
@@ -192,8 +207,15 @@ class SlowWallet(FakeNodeRPC):
 
 
     ############################################################
+    # __init__
+    ############################################################
+    #
     # A FakeNodeRPC plus the two events: the peg-in arrived,
     # the peg-in may go on.
+    #
+    # Used by:
+    #   - test_two_polls_at_once_send_one_peg_in (below) — the
+    #     one SlowWallet it builds
     ############################################################
 
     def __init__(self):
@@ -207,8 +229,16 @@ class SlowWallet(FakeNodeRPC):
 
 
     ############################################################
+    # call
+    ############################################################
+    #
     # sendtoaddress waits for the gate; every call is then
     # answered as FakeNodeRPC answers it.
+    #
+    # Used by:
+    #   - families/bitcoin/mweb.py — MwebWatch.diagnose() and
+    #     send_pegin(), on the node
+    #     test_two_polls_at_once_send_one_peg_in hands them
     ############################################################
 
     async def call(self, method, params=None, timeout=10.0, wallet=None):
@@ -224,6 +254,16 @@ class SlowWallet(FakeNodeRPC):
 
 
 
+############################################################
+# TestDeploymentState
+############################################################
+#
+# deployment_state() read against the node's real reports in
+# every shape a pool meets — bip9, bip8, buried, and newer
+# Bitcoin Core's layout — so one reader serves every chain;
+# an answer without a usable mweb entry gives nothing.
+############################################################
+
 class TestDeploymentState(unittest.TestCase):
 
 
@@ -232,6 +272,9 @@ class TestDeploymentState(unittest.TestCase):
 
 
     ############################################################
+    # test_regtest_reports_at_every_stage
+    ############################################################
+    #
     # Every stage of the real regtest activation reads as the
     # node meant it: status, whether the next block is bound,
     # the height the status began at, the activation height
@@ -262,6 +305,9 @@ class TestDeploymentState(unittest.TestCase):
 
 
     ############################################################
+    # test_knf_mainnet_bip8_report
+    ############################################################
+    #
     # The live KNF mainnet node reports MWEB as bip8 (its start
     # set by height) — read exactly like regtest's bip9.
     ############################################################
@@ -278,6 +324,9 @@ class TestDeploymentState(unittest.TestCase):
 
 
     ############################################################
+    # test_buried_deployment
+    ############################################################
+    #
     # A buried deployment has no details block: active, with
     # the height the node buried it at.
     ############################################################
@@ -294,6 +343,9 @@ class TestDeploymentState(unittest.TestCase):
 
 
     ############################################################
+    # test_getdeploymentinfo_shape
+    ############################################################
+    #
     # Newer Bitcoin Core moved deployments to getdeploymentinfo
     # under "deployments" — the same entries, read the same.
     ############################################################
@@ -309,8 +361,12 @@ class TestDeploymentState(unittest.TestCase):
 
 
     ############################################################
-    # A node that does not know MWEB — or no answer at all —
-    # gives no state.
+    # test_unknown_deployment_gives_nothing
+    ############################################################
+    #
+    # A node that does not know MWEB gives no state — and nor
+    # does no answer at all, an answer of the wrong shape, or
+    # an mweb entry that is no object.
     ############################################################
 
     def test_unknown_deployment_gives_nothing(self):
@@ -325,8 +381,12 @@ class TestDeploymentState(unittest.TestCase):
 
 
     ############################################################
+    # test_entry_without_details_falls_back_on_the_active_flag
+    ############################################################
+    #
     # An entry without its details block falls back on the
-    # active flag alone.
+    # active flag alone for its status, and knows no height
+    # that status began at.
     ############################################################
 
     def test_entry_without_details_falls_back_on_the_active_flag(self):
@@ -342,6 +402,16 @@ class TestDeploymentState(unittest.TestCase):
 
 
 
+############################################################
+# TestActivationHeight
+############################################################
+#
+# activation_height(): when the node's reports tell the
+# height of the first MWEB block — named outright, or
+# following from lock-in and a remembered period — and when
+# nothing can tell it yet.
+############################################################
+
 class TestActivationHeight(unittest.TestCase):
 
 
@@ -350,6 +420,9 @@ class TestActivationHeight(unittest.TestCase):
 
 
     ############################################################
+    # test_active_deployment_names_its_height
+    ############################################################
+    #
     # Active: the node names the height — or its "since" when
     # it does not.
     ############################################################
@@ -366,6 +439,9 @@ class TestActivationHeight(unittest.TestCase):
 
 
     ############################################################
+    # test_locked_in_follows_from_the_period
+    ############################################################
+    #
     # Locked in at 288 with a 144-block period: active from
     # 432, which is where the real chain activated. The node
     # drops the period after lock-in, so it comes from memory.
@@ -383,6 +459,9 @@ class TestActivationHeight(unittest.TestCase):
 
 
     ############################################################
+    # test_not_known_before_lock_in
+    ############################################################
+    #
     # Before lock-in nothing tells the height yet.
     ############################################################
 
@@ -399,6 +478,15 @@ class TestActivationHeight(unittest.TestCase):
 
 
 
+############################################################
+# TestFirstBlockPending
+############################################################
+#
+# first_block_pending(): the one moment a chain needs a
+# peg-in — MWEB bound from the next block while the tip has
+# no MWEB section — told apart from every other state.
+############################################################
+
 class TestFirstBlockPending(unittest.TestCase):
 
 
@@ -407,6 +495,9 @@ class TestFirstBlockPending(unittest.TestCase):
 
 
     ############################################################
+    # test_the_real_stall_is_recognized
+    ############################################################
+    #
     # The real stall: MWEB bound from the next block, the tip
     # without an MWEB section.
     ############################################################
@@ -422,6 +513,9 @@ class TestFirstBlockPending(unittest.TestCase):
 
 
     ############################################################
+    # test_everything_else_is_no_stall
+    ############################################################
+    #
     # A tip that has its MWEB section is past the first block;
     # a chain before activation is not there yet; and nothing
     # known means no stall.
@@ -444,6 +538,15 @@ class TestFirstBlockPending(unittest.TestCase):
 
 
 
+############################################################
+# TestSendPegin
+############################################################
+#
+# send_pegin() against a fake node: the two wallet calls a
+# peg-in takes, how the wallet name and the fee rate travel
+# with them, and how the wallet's refusal comes back.
+############################################################
+
 class TestSendPegin(unittest.IsolatedAsyncioTestCase):
 
 
@@ -452,6 +555,9 @@ class TestSendPegin(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_pegin_pays_a_fresh_mweb_address
+    ############################################################
+    #
     # A peg-in is a fresh MWEB address of the wallet and a
     # payment to it, both routed to the named wallet, the fee
     # rate riding along as a named argument.
@@ -475,6 +581,9 @@ class TestSendPegin(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_no_fee_rate_and_no_wallet_name
+    ############################################################
+    #
     # Without a fee rate the payment leaves the fee to the
     # wallet; without a wallet name the calls take the node's
     # plain endpoint.
@@ -494,6 +603,9 @@ class TestSendPegin(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_a_refusal_is_raised
+    ############################################################
+    #
     # The wallet's refusal reaches the caller as the node's
     # own error.
     ############################################################
@@ -513,6 +625,16 @@ class TestSendPegin(unittest.IsolatedAsyncioTestCase):
 
 
 
+############################################################
+# TestPeginHint
+############################################################
+#
+# pegin_hint() over the wallet's real refusals: each mapped
+# to the fix the operator needs, read from the message where
+# two refusals share a code, and no hint for what it does
+# not know.
+############################################################
+
 class TestPeginHint(unittest.TestCase):
 
 
@@ -521,7 +643,12 @@ class TestPeginHint(unittest.TestCase):
 
 
     ############################################################
-    # Every real refusal the wallet gave gets its fix.
+    # test_every_real_refusal_gets_its_fix
+    ############################################################
+    #
+    # Every real refusal the wallet gave gets its fix — and
+    # the fixes cover exactly the captured refusals, so one
+    # added to the vectors without a fix fails here.
     ############################################################
 
     def test_every_real_refusal_gets_its_fix(self):
@@ -544,6 +671,9 @@ class TestPeginHint(unittest.TestCase):
 
 
     ############################################################
+    # test_one_code_two_fixes
+    ############################################################
+    #
     # A fee rate too low and a wallet too poor share code -6;
     # the hint follows the message, not the code.
     ############################################################
@@ -561,6 +691,9 @@ class TestPeginHint(unittest.TestCase):
 
 
     ############################################################
+    # test_no_fee_estimate
+    ############################################################
+    #
     # A wallet without a fee estimate (the node's own wording,
     # from its transaction assembler) is told to set a rate.
     ############################################################
@@ -577,6 +710,9 @@ class TestPeginHint(unittest.TestCase):
 
 
     ############################################################
+    # test_no_hint_for_the_unknown
+    ############################################################
+    #
     # An unknown refusal, and a failure that is no refusal at
     # all, get no hint.
     ############################################################
@@ -592,6 +728,15 @@ class TestPeginHint(unittest.TestCase):
 
 
 
+############################################################
+# TestMwebWatchObserve
+############################################################
+#
+# MwebWatch.observe(): the deployment announcements an
+# operator sees as the chain moves through the activation,
+# and silence when the node has nothing to report.
+############################################################
+
 class TestMwebWatchObserve(unittest.IsolatedAsyncioTestCase):
 
 
@@ -600,6 +745,9 @@ class TestMwebWatchObserve(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_each_state_is_announced_once
+    ############################################################
+    #
     # Each state is announced once, however many tips report
     # it.
     ############################################################
@@ -629,9 +777,14 @@ class TestMwebWatchObserve(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_lock_in_names_the_first_block_and_its_peg_in
+    ############################################################
+    #
     # At lock-in the period remembered from signalling names
     # the first MWEB block — 432 on the real chain — and the
-    # panel says what that block will need.
+    # panel says what that block will need: it asks for
+    # MWEB_PEGIN_AMOUNT when none is set, and names the
+    # amount the pool will peg in when one is.
     ############################################################
 
     async def test_lock_in_names_the_first_block_and_its_peg_in(self):
@@ -658,6 +811,9 @@ class TestMwebWatchObserve(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_no_peg_in_note_after_the_first_block
+    ############################################################
+    #
     # Once the first MWEB block is in, the active panel has
     # nothing to warn about.
     ############################################################
@@ -678,6 +834,9 @@ class TestMwebWatchObserve(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_silence_without_an_answer
+    ############################################################
+    #
     # A node that fails, or does not know MWEB, makes the watch
     # say nothing.
     ############################################################
@@ -699,6 +858,16 @@ class TestMwebWatchObserve(unittest.IsolatedAsyncioTestCase):
 
 
 
+############################################################
+# TestMwebWatchDiagnose
+############################################################
+#
+# MwebWatch.diagnose() on a stalled fake node with a fake
+# clock: the first MWEB block's stall told apart from every
+# other template failure, how often the stall is explained,
+# and the one-peg-in-per-stuck-tip rule with its retry.
+############################################################
+
 class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
@@ -707,7 +876,12 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # A fake clock for the retry and reminder intervals.
+    # setUp
+    ############################################################
+    #
+    # A fake clock for the retry and reminder intervals, and
+    # the node's real refusal of the first MWEB block's
+    # template as the failure every test diagnoses.
     ############################################################
 
     def setUp(self):
@@ -723,6 +897,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_any_other_failure_is_left_alone
+    ############################################################
+    #
     # Not the first MWEB block — before activation, after the
     # first block, or a node that cannot even answer — is no
     # business of the watch: "other", and not a word printed.
@@ -749,6 +926,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_stall_without_peg_in_is_explained_once
+    ############################################################
+    #
     # Without MWEB_PEGIN_AMOUNT the stall is explained once —
     # with the node's refusal and the manual remedy — and the
     # wallet is never touched.
@@ -775,6 +955,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_a_lasting_stall_is_explained_again
+    ############################################################
+    #
     # A stall that lasts is explained again every
     # STALL_REMINDER_SECONDS — a stopped chain never goes quiet.
     ############################################################
@@ -798,6 +981,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_peg_in_unsticks_the_chain
+    ############################################################
+    #
     # With MWEB_PEGIN_AMOUNT set the watch pegs in through the
     # configured wallet and answers "unstuck", so the caller
     # asks for the template again at once.
@@ -823,6 +1009,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_a_sent_peg_in_is_never_repeated
+    ############################################################
+    #
     # A peg-in that went out is never sent again for the same
     # tip; a later reminder names it and points at its fee.
     ############################################################
@@ -847,6 +1036,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_a_failed_peg_in_is_retried_after_the_interval
+    ############################################################
+    #
     # A refused peg-in is reported with its fix and tried again
     # once PEGIN_RETRY_SECONDS have passed — not before.
     ############################################################
@@ -878,6 +1070,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_a_new_stuck_tip_starts_over
+    ############################################################
+    #
     # A new stuck tip (another block at the same height) starts
     # over: explained again, pegged in again.
     ############################################################
@@ -902,6 +1097,9 @@ class TestMwebWatchDiagnose(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_two_polls_at_once_send_one_peg_in
+    ############################################################
+    #
     # Two template polls failing at once send ONE peg-in: the
     # attempt is marked before the wallet call returns. The
     # waits are bounded, so a second peg-in stuck at the gate

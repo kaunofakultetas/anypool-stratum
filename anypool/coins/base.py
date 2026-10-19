@@ -1,21 +1,24 @@
 ############################################################
 #  [*] Coin Definition Base
 #
-#  The contract every supported coin must fulfill. A coin is
-#  fully described by one frozen CoinDefinition instance:
-#  which PoW function it uses, what its difficulty-1 target
-#  is, which getblocktemplate rules to request, how its
-#  addresses turn into payout scripts, and whether it has the
-#  MWEB extension block — a coin that has it also carries the
-#  operator's MWEB peg-in settings (MwebPegin), the settings
-#  only such coins have.
+#  The contract every supported coin must fulfill. A coin of
+#  the Bitcoin family is fully described by one frozen
+#  CoinDefinition instance: which PoW function it uses, what
+#  its difficulty-1 target is, which getblocktemplate rules
+#  to request, how its addresses turn into payout scripts,
+#  and whether it has the MWEB extension block — a coin that
+#  has it also carries the operator's MWEB peg-in settings
+#  (MwebPegin), the settings only such coins have. A
+#  CryptoNote coin is described by the much smaller
+#  CryptonoteCoinDefinition.
 #
 #  Adding a new coin never touches family or stratum code —
-#  create anypool/coins/<symbol>.py with one CoinDefinition
-#  and register it in anypool/coins/__init__.py. Older
-#  Bitcoin Core forks without segwit (Dogecoin & friends)
-#  work by picking the Base58P2PKH address scheme, an empty
-#  gbt_rules list and has_mweb=False.
+#  create a module for it in anypool/coins/, named after its
+#  ticker symbol, with one definition, and register it in
+#  anypool/coins/__init__.py. Older Bitcoin Core forks
+#  without segwit (Dogecoin & friends) work by picking the
+#  Base58P2PKH address scheme, an empty gbt_rules list and
+#  leaving has_mweb off.
 #
 #  Used by:
 #    - coins/btc.py, ltc.py, doge.py, knf.py — CoinDefinition
@@ -187,33 +190,54 @@ class MwebPegin:
 
 
 ############################################################
+# CoinDefinition
+############################################################
+#
 # The Bitcoin-family contract: the pool builds the coinbase
 # and merkle tree itself and PoW-hashes 80-byte headers, so
 # a coin must say how to hash, what difficulty 1 means,
 # which template rules to request and how payout addresses
-# turn into scripts.
+# turn into scripts. One frozen instance per coin.
+#
+# Used by:
+#   - coins/btc.py, doge.py, knf.py, ltc.py — one instance
+#     each
+#   - coins/__init__.py — the return type of get_coin() and
+#     active()
+#   - config.py — validate(), the selected coin's networks,
+#     address scheme and peg-in settings
+#   - families/bitcoin/ — reads the active coin's fields
+#     through coins.active()
 ############################################################
 
 @dataclass(frozen=True)
 class CoinDefinition:
 
-    # Ticker symbol, e.g. "KNF"
+    # Ticker symbol, e.g. "KNF" — informational: nothing in
+    # the pool reads it (tests/test_coins.py checks that it
+    # matches the REGISTRY key)
     name: str
 
-    # Human-readable PoW algorithm name, e.g. "SCRYPT"
+    # Human-readable PoW algorithm name, e.g. "SCRYPT" —
+    # informational: nothing reads it at the moment
     algo: str
 
     # The function hashing an 80-byte header into the PoW
     # hash (big-endian hex, comparable against a target)
     pow_hash: Callable[[bytes], str]
 
-    # Reference target at difficulty 1 for this algorithm:
-    #   target = difficulty_1_target // difficulty
+    # Reference target at difficulty 1 for this algorithm.
+    # A difficulty's target is this value integer-divided by
+    # the difficulty, and back (calculate_mining_target() and
+    # calculate_mining_difficulty() in
+    # families/bitcoin/server.py).
     difficulty_1_target: int
 
     # Rules to request from getblocktemplate. Empty list for
     # old daemons that predate the rules mechanism — the
-    # request object is then omitted entirely.
+    # request object then carries no rules, and is omitted
+    # entirely unless a longpoll id has to go in it (see
+    # gbt_request below).
     gbt_rules: List[str]
 
     # How REWARD_ADDR becomes the coinbase payout script
@@ -257,9 +281,9 @@ class CoinDefinition:
     # networks
     ############################################################
     #
-    # The network names this coin supports ("mainnet", ...) —
-    # delegated to the address scheme, which is the only part
-    # that differs per network.
+    # The network names this coin supports, the values
+    # COIN_NETWORK may take — delegated to the address scheme,
+    # which is the only part that differs per network.
     #
     # Used by:
     #   - config.py — validate()
@@ -277,14 +301,15 @@ class CoinDefinition:
     # gbt_request
     ############################################################
     #
-    # Builds the getblocktemplate params for this coin:
-    #
-    #   rules + longpollid  -> [{"rules": [...], "longpollid": x}]
-    #   rules only          -> [{"rules": [...]}]
-    #   nothing             -> []   (old daemons, plain poll)
+    # Builds the params list for getblocktemplate: a single
+    # request object carrying the coin's rules (when it has
+    # any) and the longpoll id (when one is given), or an
+    # empty list when there is neither — an old daemon that
+    # predates the rules mechanism then gets a plain poll.
     #
     # Used by:
-    #   - families/bitcoin/server.py — create_job()
+    #   - families/bitcoin/server.py — _fetch_template(), the
+    #     template fetch of create_job()
     #   - families/bitcoin/runner.py — longpoll_loop()
     ############################################################
 
@@ -304,29 +329,49 @@ class CoinDefinition:
 
 
 ############################################################
+# CryptonoteCoinDefinition
+############################################################
+#
 # The CryptoNote-family contract. Much smaller than the
 # Bitcoin one: the DAEMON builds the whole block (the pool
 # only writes an extranonce into the template's reserved
 # space), so no payout scripts, GBT rules or header hashing
 # — just the CN PoW variant and the address scheme.
+#
+# Used by:
+#   - coins/ltl.py — its one instance
+#   - config.py — validate(), the selected coin's networks
+#     and address scheme
+#   - families/cryptonote/server.py — reads the active
+#     coin's reserve_size and cn_variant through
+#     coins.active()
 ############################################################
 
 @dataclass(frozen=True)
 class CryptonoteCoinDefinition:
 
-    # Ticker symbol, e.g. "LTL"
+    # Ticker symbol, e.g. "LTL" — informational: nothing in
+    # the pool reads it (tests/test_coins.py checks that it
+    # matches the REGISTRY key)
     name: str
 
-    # Human-readable PoW algorithm name, e.g. "CRYPTONIGHT"
+    # Human-readable PoW algorithm name, e.g. "CRYPTONIGHT" —
+    # informational: nothing reads it at the moment
     algo: str
 
-    # CryptoNight variant passed to the PoW library (and the
-    # algo name announced to XMRig): 0 = classic cn/0, which
-    # is what a chain frozen at block major version 1 uses.
+    # CryptoNight variant passed to the PoW library: 0 =
+    # classic cn/0, which is what a chain frozen at block
+    # major version 1 uses. The algo name announced to XMRig
+    # does NOT follow it — job_payload() in
+    # families/cryptonote/connection.py sends a hard-coded
+    # "cn/0", so a coin on another variant would need that
+    # changed as well.
     cn_variant: int
 
-    # How the pool validates REWARD_ADDR and what it announces
-    # to miners (CryptoNoteAddress from coins/address.py)
+    # How the pool validates REWARD_ADDR at startup
+    # (CryptoNoteAddress from coins/address.py); the daemon
+    # receives the address string itself and builds the
+    # coinbase from it
     address_scheme: object
 
     # Bytes of TX_EXTRA_NONCE space requested from the daemon

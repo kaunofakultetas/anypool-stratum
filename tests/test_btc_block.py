@@ -32,6 +32,15 @@ from tests import vectors
 
 
 
+############################################################
+# TestBtcBlock5062063
+############################################################
+#
+# Replays BTC testnet3 block 5062063 under the pool setup
+# that mined it: the job cut from its template, the share
+# that solved it, and a nonce that would not have.
+############################################################
+
 class TestBtcBlock5062063(unittest.TestCase):
 
 
@@ -40,8 +49,12 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
     ############################################################
-    # Switch the pool config to the BTC testnet3 setup that
-    # mined the block; restore the suite-wide KNF config after.
+    # setUp
+    ############################################################
+    #
+    # Switches the pool config to the BTC testnet3 setup that
+    # mined the block, keeping the suite-wide KNF values for
+    # tearDown() to put back.
     ############################################################
 
     def setUp(self):
@@ -58,6 +71,9 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
     ############################################################
+    # tearDown
+    ############################################################
+    #
     # Restore the suite-wide KNF config for the other modules.
     ############################################################
 
@@ -71,6 +87,9 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
     ############################################################
+    # test_job_fields
+    ############################################################
+    #
     # build_job() fed with the block's template must reproduce
     # the exact job the pool broadcast — including the merkle
     # branch over the 8 template transactions.
@@ -94,6 +113,9 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
     ############################################################
+    # test_winning_share_round_trip
+    ############################################################
+    #
     # The winning share must rebuild the accepted block's
     # 80-byte header and its hash (for SHA256d the PoW hash IS
     # the block hash), and pass both targets.
@@ -122,6 +144,9 @@ class TestBtcBlock5062063(unittest.TestCase):
 
 
     ############################################################
+    # test_wrong_nonce_fails_targets
+    ############################################################
+    #
     # Any other nonce must change the header and fail the
     # min-difficulty target.
     ############################################################

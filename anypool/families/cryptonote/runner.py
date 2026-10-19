@@ -15,7 +15,8 @@
 #      arrived mempool transactions get mined
 #
 #  Used by:
-#    - main.py — via families.active().run()
+#    - main.py — main() runs this module's run() once
+#      families.active() has picked the CryptoNote family
 ############################################################
 
 
@@ -27,8 +28,9 @@ from anypool.families.cryptonote.server import CnStratumServer
 
 
 # Seconds between /getheight tip polls. The call costs the
-# daemon nearly nothing, and 2s keeps stale-work windows
-# shorter than one CryptoNight hash on a slow CPU.
+# daemon nearly nothing, so polling this often is free and
+# keeps the window in which miners hash on a stale tip down
+# to a couple of seconds.
 TIP_POLL_INTERVAL = 2
 
 # Seconds between forced template refreshes (picks up new
@@ -47,9 +49,11 @@ TEMPLATE_REFRESH_INTERVAL = 120
 ############################################################
 #
 # Notices chain tip movement: when /getheight disagrees with
-# the height the current template builds on, cut a fresh job.
+# the height the current template mines at, cut a fresh job.
 # Errors just wait an interval and retry — the pool stays up
-# through node restarts.
+# through node restarts. A reorg that swaps the tip block
+# without changing the height is invisible to this check;
+# template_refresh_loop() picks it up on its next round.
 #
 # Used by:
 #   - runner.py — run()
@@ -107,12 +111,16 @@ async def template_refresh_loop(server: CnStratumServer):
 # run
 ############################################################
 #
-# Boot sequence: create the server (prints the startup
-# banner) -> fetch the initial template -> open the stratum
-# port -> run listener and both poll loops concurrently.
+# Boot sequence: create the server (which prints the
+# startup banner), fetch the initial template, open the
+# stratum port, then run the listener and both poll loops
+# concurrently until the process stops — closing the
+# daemon session on the way out. A failed first fetch is
+# not fatal: the poll loops and the first login retry it.
 #
 # Used by:
-#   - main.py — via families.active().run()
+#   - main.py — main(), once families.active() has picked
+#     this family
 ############################################################
 
 async def run():

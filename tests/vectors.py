@@ -7,8 +7,9 @@
 #    - KNF mainnet block 1777 (Scrypt, cgminer 4.9.0,
 #      coinbase-only block, empty merkle branch)
 #    - BTC testnet3 block 5062063 (SHA256d, cgminer 4.4.2,
-#      8 transactions, 4-level merkle branch, mined during a
-#      testnet 20-minute min-difficulty window)
+#      the coinbase and 8 template transactions, 4-level
+#      merkle branch, mined during a testnet 20-minute
+#      min-difficulty window)
 #
 #  That network acceptance is what makes these vectors
 #  trustworthy: if the code reproduces every intermediate
@@ -18,8 +19,8 @@
 #  Used by:
 #    - tests/test_hashing.py, test_merkle.py, test_coinbase.py,
 #      test_jobs.py, test_header.py, test_blocks.py,
-#      test_btc_block.py, test_server.py, test_coins.py,
-#      test_bech32.py
+#      test_btc_block.py, test_server.py,
+#      test_job_freshness.py, test_coins.py, test_bech32.py
 ############################################################
 
 
@@ -134,7 +135,7 @@ NETWORK_TARGET = 0x000000003fffc000000000000000000000000000000000000000000000000
 
 
 ############################################################
-# BTC testnet3 block 5062063 — SHA256d, 8 transactions
+# BTC testnet3 block 5062063 — SHA256d, 9 transactions
 ############################################################
 #
 # Mined 2026-07-14 20:29:02 through this pool (job 00000002)
@@ -143,14 +144,14 @@ NETWORK_TARGET = 0x000000003fffc000000000000000000000000000000000000000000000000
 # block carries a NON-empty merkle branch, so it also
 # exercises the branch folding path end to end.
 #
-# The pool ran with:
-#   COIN=BTC, COIN_NETWORK=testnet3
-#   REWARD_ADDR=tb1qzlz8wv7qu40xx66sqc3r98qkgsys6vwtp3k0nj
-#   COINBASE_MESSAGE=/AnyPool Miner from VU KNF/
+# The pool ran as COIN BTC on the testnet3 network, with
+# REWARD_ADDR tb1qzlz8wv7qu40xx66sqc3r98qkgsys6vwtp3k0nj and
+# COINBASE_MESSAGE "/AnyPool Miner from VU KNF/" — the setup
+# tests/test_btc_block.py switches the config to.
 ############################################################
 
 # The block template as getblocktemplate reported it,
-# reconstructed from the logged job + coinbase debug boxes.
+# reconstructed from the logged job and coinbase debug boxes.
 # ("data" is not in the logs, so it is left empty — enough for
 # build_job, which only reads the txids.)
 BTC_TEMPLATE = {
@@ -210,8 +211,8 @@ BTC_TEMPLATE_TXIDS_LE = [
     "b10672907609fc62d2728226cb1c3943f04a5ca88bf5d15619a7285c8526456a",
 ]
 
-# The winning share exactly as cgminer 4.4.2 submitted it:
-#   {"params":["x","00000002","0a000000","6a5671dc","a6065390"]}
+# The winning share exactly as cgminer 4.4.2 submitted it,
+# in its mining.submit for job 00000002
 BTC_EXTRANONCE1 = "00000001"     # assigned by the pool to this connection
 BTC_EXTRANONCE2 = "0a000000"     # chosen by the miner
 BTC_SHARE_NTIME = "6a5671dc"
@@ -234,8 +235,8 @@ BTC_HEADER_HEX = (
 BTC_BLOCK_HASH = "00000000b0f90acd2369909c621f4ec05aa6d7b04c7ba44986f5b444cff09d6e"
 
 # Targets in effect when the share arrived (min-difficulty
-# window: POLL_DIFF_DROPPER had lowered pool diff to 1, so
-# pool target == network target == bdiff 1)
+# window: POLL_DIFF_DROPPER had lowered the pool difficulty
+# to 1, so pool and network shared the difficulty-1 target)
 BTC_POOL_DIFFICULTY = 1
 BTC_POOL_TARGET = 0x00000000FFFF0000000000000000000000000000000000000000000000000000
 BTC_NETWORK_TARGET = 0x00000000FFFF0000000000000000000000000000000000000000000000000000

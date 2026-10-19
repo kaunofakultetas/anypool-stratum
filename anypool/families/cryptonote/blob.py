@@ -10,12 +10,13 @@
 #    parse_block()      — split the blob into header fields,
 #                         the miner transaction and the tx
 #                         hash list (validates every byte)
-#    hashing_blob()     — derive the 76-byte blob miners
-#                         actually hash: header + merkle tree
-#                         root + tx count
+#    hashing_blob()     — derive the blob miners actually
+#                         hash (usually 76 bytes): header +
+#                         merkle tree root + tx count
 #    block_id()         — a block's id (keccak of the size-
-#                         prefixed hashing blob); used to
-#                         verify parsing against real blocks
+#                         prefixed hashing blob); verifies the
+#                         parse against real blocks and names
+#                         found blocks in the log
 #    with_nonce() /
 #    with_extranonce()  — byte-level injection of the miner
 #                         nonce and the pool's extranonce
@@ -57,9 +58,10 @@ _TXIN_GEN = 0xFF
 ############################################################
 #
 # CryptoNote's merkle tree (tree-hash.c): NOT Bitcoin's. The
-# leaf count is first reduced to the largest power of two <=
-# n by pair-hashing the TAIL of the list, then halved level
-# by level. One leaf hashes to itself.
+# leaf count is first reduced to the largest power of two
+# not above it by pair-hashing leaves at the TAIL of the
+# list, then halved level by level. One leaf is its own
+# root; an empty list raises ValueError.
 #
 # Used by:
 #   - hashing_blob() (below)
@@ -163,15 +165,22 @@ def _parse_miner_tx(blob: bytes, offset: int) -> int:
 ############################################################
 #
 # Full structural parse of a block (template) blob. Raises
-# ValueError unless every byte is accounted for — a pool must
-# never mine on a blob it does not fully understand.
+# unless every byte is accounted for — a pool must never
+# mine on a blob it does not fully understand. Structural
+# checks raise ValueError, but a blob cut short mostly
+# surfaces as IndexError from the byte reads, so callers
+# must not catch ValueError alone.
 #
 # Returns a dict of offsets and parts; all offsets are into
 # the ORIGINAL blob so injection helpers can patch bytes
 # in place.
 #
 # Used by:
-#   - families/cryptonote/jobs.py, server.py, tests
+#   - hashing_blob() (below)
+#   - families/cryptonote/jobs.py   — set_template()
+#   - families/cryptonote/server.py — create_job(), the tx
+#     count for the new-job panel
+#   - tests/test_cn_blob.py
 ############################################################
 
 def parse_block(blob: bytes) -> Dict:
@@ -227,15 +236,18 @@ def parse_block(blob: bytes) -> Dict:
 #
 # The blob miners hash (and the input to the PoW function):
 #
-#   header (up to and incl. nonce) | tree root | varint(1+n)
+#   header (up to and incl. nonce) | tree root | tx count
 #
 # where the tree root covers the miner tx hash followed by
-# the other tx hashes. 76 bytes for a typical block. The
+# the other tx hashes, and the tx count is a varint that
+# counts the miner tx too. 76 bytes for a typical block. The
 # miner tx hash for v1 txs is the keccak of its raw bytes.
 #
 # Used by:
-#   - families/cryptonote/jobs.py   — job blobs for miners
-#   - families/cryptonote/server.py — share validation
+#   - families/cryptonote/jobs.py — make_job(); the result is
+#     the blob each miner receives and the one
+#     process_share() re-hashes
+#   - block_id() (below)
 ############################################################
 
 def hashing_blob(blob: bytes) -> bytes:
@@ -285,8 +297,10 @@ def block_id(blob: bytes) -> bytes:
 ############################################################
 #
 # Byte-level injection of the miner's 4-byte nonce into a
-# (hashing or template) blob at the header nonce offset.
-# Returns a NEW bytes object.
+# (hashing or template) blob at the header nonce offset —
+# both blobs open with the same header, so one offset
+# serves both. Returns a NEW bytes object; a nonce of any
+# other length raises ValueError.
 #
 # Used by:
 #   - families/cryptonote/server.py — share validation and

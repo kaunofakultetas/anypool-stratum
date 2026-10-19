@@ -4,7 +4,9 @@
 #  Covers anypool/crypto/hashing.py. The Scrypt test hashes
 #  the real header of KNF block 1777 and expects the exact
 #  PoW hash the network accepted — if the endianness handling
-#  anywhere in hashing.py drifts, this fails.
+#  anywhere in hashing.py drifts, this fails. The Scrypt
+#  tests need the scrypt module, which the stratum image has
+#  installed and a bare host usually does not.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -29,6 +31,14 @@ from tests import vectors
 
 
 
+############################################################
+# TestSha256d
+############################################################
+#
+# Double SHA256 itself, against the published constant for
+# empty input and against block 1777's block hash.
+############################################################
+
 class TestSha256d(unittest.TestCase):
 
 
@@ -37,6 +47,9 @@ class TestSha256d(unittest.TestCase):
 
 
     ############################################################
+    # test_known_vector_empty_input
+    ############################################################
+    #
     # Double SHA256 of an empty string is a well-known constant.
     ############################################################
 
@@ -52,6 +65,9 @@ class TestSha256d(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_header_hash
+    ############################################################
+    #
     # sha256d of block 1777's header equals its block hash
     # (byte-reversed for display, as printed by the pool).
     ############################################################
@@ -70,6 +86,15 @@ class TestSha256d(unittest.TestCase):
 
 
 
+############################################################
+# TestScryptPowHash
+############################################################
+#
+# The Scrypt proof-of-work hash KNF mines with: block 1777's
+# header must hash to the PoW hash the network accepted, and
+# nothing but an 80-byte header is hashed at all.
+############################################################
+
 class TestScryptPowHash(unittest.TestCase):
 
 
@@ -78,6 +103,9 @@ class TestScryptPowHash(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_pow_hash
+    ############################################################
+    #
     # The crown jewel: the exact 80-byte header the ASIC solved
     # must produce the exact PoW hash the network accepted.
     ############################################################
@@ -92,6 +120,9 @@ class TestScryptPowHash(unittest.TestCase):
 
 
     ############################################################
+    # test_rejects_wrong_length
+    ############################################################
+    #
     # Anything that is not exactly 80 bytes must be refused.
     ############################################################
 
@@ -107,6 +138,15 @@ class TestScryptPowHash(unittest.TestCase):
 
 
 
+
+############################################################
+# TestSha256dPowHash
+############################################################
+#
+# The SHA256d proof-of-work hash, checked on the Bitcoin
+# genesis header — a header every implementation agrees on —
+# and against BTC's difficulty-1 target.
+############################################################
 
 class TestSha256dPowHash(unittest.TestCase):
 
@@ -128,6 +168,9 @@ class TestSha256dPowHash(unittest.TestCase):
 
 
     ############################################################
+    # test_bitcoin_genesis
+    ############################################################
+    #
     # For SHA256 coins the PoW hash IS the block hash: hashing
     # the genesis header must give the genesis block hash.
     ############################################################
@@ -142,6 +185,9 @@ class TestSha256dPowHash(unittest.TestCase):
 
 
     ############################################################
+    # test_genesis_meets_difficulty_1
+    ############################################################
+    #
     # The genesis hash must satisfy the difficulty-1 target —
     # exactly the comparison process_share() performs.
     ############################################################
@@ -159,6 +205,9 @@ class TestSha256dPowHash(unittest.TestCase):
 
 
     ############################################################
+    # test_rejects_wrong_length
+    ############################################################
+    #
     # Anything that is not exactly 80 bytes must be refused.
     ############################################################
 
@@ -175,6 +224,14 @@ class TestSha256dPowHash(unittest.TestCase):
 
 
 
+############################################################
+# TestReverseHex
+############################################################
+#
+# reverse_hex(), the byte-order flip between a field's
+# display form and its place in the serialized header.
+############################################################
+
 class TestReverseHex(unittest.TestCase):
 
 
@@ -183,7 +240,11 @@ class TestReverseHex(unittest.TestCase):
 
 
     ############################################################
-    # The example straight from the function's docstring.
+    # test_byte_reversal
+    ############################################################
+    #
+    # A plain byte-wise reversal: the bytes swap order, the
+    # two hex digits inside each byte stay as they were.
     ############################################################
 
     def test_byte_reversal(self):
@@ -195,6 +256,9 @@ class TestReverseHex(unittest.TestCase):
 
 
     ############################################################
+    # test_round_trip
+    ############################################################
+    #
     # Reversing twice must be the identity.
     ############################################################
 
@@ -208,7 +272,11 @@ class TestReverseHex(unittest.TestCase):
 
 
     ############################################################
-    # Version field of block 1777: job value -> header value.
+    # test_block_1777_version
+    ############################################################
+    #
+    # Block 1777's version as the job carried it, flipped into
+    # the byte order of the accepted header.
     ############################################################
 
     def test_block_1777_version(self):
@@ -221,6 +289,15 @@ class TestReverseHex(unittest.TestCase):
 
 
 
+############################################################
+# TestReverseHex4bChunks
+############################################################
+#
+# reverse_hex_4b_chunks(), the word swap between the stratum
+# wire form of the previous block hash and its place in the
+# serialized header, on block 1777's real prevhash.
+############################################################
+
 class TestReverseHex4bChunks(unittest.TestCase):
 
 
@@ -229,6 +306,9 @@ class TestReverseHex4bChunks(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_prevhash_to_header_form
+    ############################################################
+    #
     # Word-swapping the wire-format prevhash of block 1777 must
     # give the prevhash bytes inside the accepted header.
     ############################################################
@@ -246,6 +326,9 @@ class TestReverseHex4bChunks(unittest.TestCase):
 
 
     ############################################################
+    # test_round_trip
+    ############################################################
+    #
     # Applying the word swap twice must be the identity.
     ############################################################
 

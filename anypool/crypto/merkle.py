@@ -47,8 +47,10 @@ from anypool.crypto.hashing import sha256d
 # sibling hashes needed to rebuild the root from that leaf.
 #
 # Works level by level: pad to an even count, record the
-# sibling of our index (idx ^ 1), hash the pairs into the
-# next level, halve the index, repeat until one node is left.
+# sibling of our index (the index with its lowest bit
+# flipped), hash the pairs into the next level, halve the
+# index, repeat until one node is left. No hashes at all
+# give an empty branch.
 #
 # Used by:
 #   - families/bitcoin/jobs.py — build_job() proves the coinbase (index 0)
@@ -65,7 +67,8 @@ def calculate_merkle_branch(tx_hashes: List[str], index_to_prove: int) -> List[s
 
     while len(level) > 1:
 
-        # Pad to even count
+        # An odd level pairs its last hash with itself — the
+        # Bitcoin rule the node's merkle root follows too
         if len(level) % 2 == 1:
             level.append(level[-1])
 

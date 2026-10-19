@@ -104,7 +104,10 @@ def _keccak_f(state):
 # (136-byte blocks) and the original 0x01 padding.
 #
 # Used by:
-#   - crypto/cn_base58.py, families/cryptonote/blob.py
+#   - crypto/cn_base58.py — encode_addr(), decode_addr(),
+#     the address checksum
+#   - families/cryptonote/blob.py — tree_hash(), the miner
+#     tx hash in hashing_blob(), block_id()
 ############################################################
 
 def keccak_256(data: bytes) -> bytes:

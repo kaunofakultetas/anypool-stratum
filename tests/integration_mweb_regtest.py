@@ -18,16 +18,21 @@
 #  It needs a fresh regtest chain (MWEB not active yet) on a
 #  node with wallet support, reached through the RPC_*
 #  settings, and refuses any chain but regtest — it mines.
-#  Run it inside the stratum image as a module of the tests
-#  package, which pins the KNF pool settings the way
-#  tests/__init__.py does for the unit tests; README's
-#  "Running the Tests" has the commands. Exit code 0 = the
-#  stall was recognized, the peg-in sent and the first MWEB
-#  blocks accepted; 2 = not a fresh regtest chain; anything
-#  else = failure.
+#  Run it inside the stratum image, from the repo root (the
+#  image's working directory), as a module of the tests
+#  package: importing the package first runs
+#  tests/__init__.py, which pins the KNF pool settings the
+#  unit tests use.
+#
+#  The exit code is 0 once the stall was recognized, the
+#  peg-in sent and the first MWEB blocks accepted, 2 when the
+#  chain is not a fresh regtest chain, and anything else on
+#  a failure.
 #
 #  Used by:
-#    - manual/CI integration runs (not unittest discovery)
+#    - manual integration runs against a regtest node;
+#      unittest discovery never picks it up (its name does
+#      not start with test)
 ############################################################
 
 
@@ -221,7 +226,6 @@ async def main():
     server = StratumServer()
     rpc = server.rpc
     try:
-
         # STEP 1: a fresh regtest chain that knows MWEB, not active yet
         # =============================================================
         chain = await node_info(rpc)

@@ -6,7 +6,7 @@
 #
 #    header (80 bytes)
 #    | tx count (varint)
-#    | coinbase tx (FULL serialization, with witness)
+#    | coinbase tx (FULL serialization, witness on segwit)
 #    | every template transaction, verbatim ("data" field)
 #    | MWEB section, when the template carries one
 #

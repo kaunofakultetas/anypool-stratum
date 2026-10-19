@@ -6,9 +6,10 @@
 #  difficulty state and the client registry (via the shared
 #  base), and orchestrates:
 #
-#    create_job()    — get_block_template from the daemon,
-#                      cut personalized jobs when the chain
-#                      tip moves, push them to every miner
+#    create_job()    — getblocktemplate from the daemon; when
+#                      the chain tip moved (or a refresh
+#                      forces it) every miner is pushed a
+#                      freshly cut personalized job
 #    process_share() — validate one submitted share by
 #                      recomputing its CryptoNight hash
 #    block submission — network-grade shares become full
@@ -53,6 +54,29 @@ MAX_SUBMITTED_PARENTS = 50
 
 
 
+############################################################
+# CnStratumServer
+############################################################
+#
+# The one pool-wide object of a CryptoNote pool: every
+# connection, both poll loops and the background block
+# submissions share this instance. On top of the shared
+# base (client registry, statistics, background tasks) it
+# owns the daemon client, the job manager, the pool and
+# network difficulty, the per-run extranonce source and the
+# one-block-per-parent guard. Unlike the Bitcoin server it
+# keeps no shared job to broadcast — the daemon builds the
+# block, and each connection cuts its own personalized job
+# from the current template whenever it needs one.
+#
+# Used by:
+#   - families/cryptonote/runner.py — run() creates the
+#     single instance and hands it to the poll loops and to
+#     every connection
+#   - families/cryptonote/connection.py — CnConnection asks
+#     it for extranonces, difficulty, jobs and verdicts
+############################################################
+
 class CnStratumServer(BasePoolServer):
 
 
@@ -66,9 +90,9 @@ class CnStratumServer(BasePoolServer):
     #
     # Wires up RPC + job manager, derives the pool difficulty
     # from POOL_DIFFICULTY and prints the startup banner. The
-    # 4-byte instance token makes extranonces unique across
-    # pool restarts, so two runs can never hand out identical
-    # work.
+    # random 4-byte instance token makes extranonces unique
+    # across pool restarts (barring a one-in-four-billion
+    # collision), so two runs do not hand out identical work.
     #
     # Used by:
     #   - families/cryptonote/runner.py — once, at startup
@@ -121,12 +145,12 @@ class CnStratumServer(BasePoolServer):
     ############################################################
     #
     # The difficulty a job is actually cut at: the client's
-    # requested per-connection difficulty (login "worker+D" /
-    # password "d=D") or the pool default, then clamped —
-    # never above the 4-byte target encoding, never below 1,
-    # and with POLL_DIFF_DROPPER never above the network
-    # difficulty (same semantics as the Bitcoin family's
-    # dropper, applied per client).
+    # requested per-connection difficulty (asked for at login,
+    # see parse_client_difficulty) or the pool default, then
+    # clamped — never above the 4-byte target encoding, never
+    # below 1, and with POLL_DIFF_DROPPER never above the
+    # network difficulty (same semantics as the Bitcoin
+    # family's dropper, applied per client).
     #
     # Used by:
     #   - families/cryptonote/connection.py — job_payload(), handle_login()
@@ -149,28 +173,37 @@ class CnStratumServer(BasePoolServer):
     # create_job
     ############################################################
     #
-    # The template pipeline, run at startup, on tip movement
-    # (height poll) and periodically as a refresh:
+    # The template pipeline, run at startup, whenever the tip
+    # poll sees the height move, after an accepted block, and
+    # as a forced refresh every TEMPLATE_REFRESH_INTERVAL
+    # (runner.py). The daemon builds the whole block around
+    # the pool's REWARD_ADDR; this stores the template,
+    # refreshes the difficulty state (POLL_DIFF_DROPPER may
+    # lower the pool difficulty to the network's) and pushes
+    # personalized jobs to every miner — but only when the
+    # parent changed or the caller forces it (the periodic
+    # refresh, for new mempool transactions). The template
+    # itself is replaced on every fetch, so jobs cut in
+    # between (login, getjob) already carry the newer
+    # transactions.
     #
-    #   1. get_block_template from the daemon (the pool's
-    #      REWARD_ADDR becomes the coinbase — the daemon
-    #      builds the whole block for us).
-    #   2. Same parent as the current template? Only replace
-    #      state when forced (periodic refresh picks up new
-    #      mempool txs); never rebroadcast unchanged work.
-    #   3. Refresh difficulty state, cut personalized jobs
-    #      and push them to every connected miner.
-    #
-    # Returns the stored template dict, or None on failure
-    # (the poll loops just retry).
+    # Returns the stored template, or None on failure (the
+    # callers simply try again later).
     #
     # Used by:
-    #   - families/cryptonote/runner.py — startup + poll loops
-    #   - families/cryptonote/connection.py — login with no job yet
+    #   - families/cryptonote/runner.py — run() at startup,
+    #     tip_poll_loop(), template_refresh_loop()
+    #   - families/cryptonote/connection.py — handle_login()
+    #     when no template exists yet
+    #   - families/cryptonote/server.py — _submit_block_task(),
+    #     the follow-up job after an accepted block
     ############################################################
 
     async def create_job(self, force_broadcast: bool = False) -> Optional[Dict]:
         try:
+            # STEP 1: a fresh template from the daemon, built for
+            # the pool's REWARD_ADDR with room for our extranonce
+            # ===================================================
             coin = coins.active()
             template = await self.rpc.call("getblocktemplate", {
                 "wallet_address": config.REWARD_ADDR,
@@ -180,6 +213,10 @@ class CnStratumServer(BasePoolServer):
                 print(f"[ERROR] Invalid block template: {str(template)[:200]}")
                 return None
 
+
+            # STEP 2: store it (replaced even when the parent is
+            # unchanged) and refresh the difficulty state
+            # ==================================================
             is_new = self.job_manager.set_template(template, coin.reserve_size)
 
             self.network_difficulty = template["difficulty"]
@@ -187,6 +224,10 @@ class CnStratumServer(BasePoolServer):
             if config.POLL_DIFF_DROPPER and self.network_difficulty < config.POOL_DIFFICULTY:
                 self.pool_difficulty = self.network_difficulty
 
+
+            # STEP 3: announce a new parent; a new parent or a forced
+            # refresh pushes personalized jobs to every miner
+            # =======================================================
             if is_new:
                 display.new_block_panel(template["height"] - 1, template["prev_hash"])
 
@@ -229,7 +270,10 @@ class CnStratumServer(BasePoolServer):
     #
     # Cuts one personalized job per connected miner and pushes
     # it as a "job" notification. Clients that fail to receive
-    # are treated as disconnected and removed.
+    # are treated as disconnected and removed. The registry is
+    # filled on connect, not at login, so a connection that
+    # has not logged in yet is pushed a job too (and takes a
+    # slot in the job store).
     #
     # Used by:
     #   - families/cryptonote/server.py — create_job()
@@ -266,21 +310,27 @@ class CnStratumServer(BasePoolServer):
     # process_share
     ############################################################
     #
-    # Judges one submitted share:
+    # Judges one submitted share, cheapest checks first: the
+    # job must exist and belong to THIS connection and still
+    # be at the current height, and the nonce must be 8 hex
+    # chars and new for the job — the shape is checked again
+    # although handle_submit() gates it, as the server does
+    # not rely on its caller. Only then is the CryptoNight
+    # hash recomputed, and the miner's claimed result must
+    # equal it: a mismatch means broken or lying mining
+    # software. A hash meeting the job's pool difficulty is
+    # accepted; one meeting its network difficulty too is a
+    # block, submitted in the background so the miner's
+    # answer never waits on the node. Any unexpected error
+    # rejects the share as invalid, traceback in the log.
     #
-    #   1. Look up the EXACT job (and owner) it belongs to;
-    #      cheap gates: current height, nonce shape, not a
-    #      duplicate.
-    #   2. Recompute the CryptoNight hash of the nonced blob
-    #      (in the executor — ~100 ms of C).
-    #   3. The miner's claimed result hash must equal ours —
-    #      a mismatch means broken or lying mining software.
-    #   4. Meets the job's pool difficulty?    -> accepted.
-    #      Meets the network difficulty too?   -> it is a
-    #      block: submit in the background and answer the
-    #      miner immediately.
+    # Staleness is judged by height alone: after a reorg that
+    # swaps the parent but keeps the height, shares on jobs
+    # cut from the old parent still pass.
     #
-    # Returns (accepted, error_message_or_None).
+    # Returns whether the share was accepted, together with
+    # its rejection message from errors.py — none for an
+    # accepted share.
     #
     # Used by:
     #   - families/cryptonote/connection.py — handle_submit()
@@ -291,6 +341,10 @@ class CnStratumServer(BasePoolServer):
         self.shares_submitted += 1
 
         try:
+            # STEP 1: the exact job this share belongs to, then the
+            # cheap gates — current height, nonce shape, no replay —
+            # before any hashing work
+            # ======================================================
             job = self.job_manager.get(job_id)
             if not job or job["client"] is not client:
                 self.shares_rejected += 1
@@ -323,7 +377,10 @@ class CnStratumServer(BasePoolServer):
             ], color="red")
 
 
-            # Recompute the PoW hash of exactly what the miner hashed
+            # STEP 2: recompute the PoW hash of exactly what the
+            # miner hashed (in the executor — ~100 ms of C); the
+            # claimed result must match it
+            # ==================================================
             nonced_blob = with_nonce(job["hashing_blob"], bytes.fromhex(nonce),
                                      job["nonce_offset"])
             variant = coins.active().cn_variant
@@ -337,7 +394,17 @@ class CnStratumServer(BasePoolServer):
                 return False, errors.ERROR_INVALID_SHARE
 
 
-            # Judge against the difficulty snapshot THIS job was issued under
+            # STEP 3: judge against the difficulty snapshot THIS job
+            # was issued under; a hash that also meets the network
+            # difficulty is a block, submitted in the background
+            # ======================================================
+            # BUG (documented, not fixed): a block is only looked for
+            # among accepted shares. With POLL_DIFF_DROPPER off and the
+            # pool difficulty above the network's, a hash that meets
+            # the network difficulty but not the pool's is refused as
+            # low difficulty and the block it solves is never
+            # submitted — the Bitcoin family's process_share() judges
+            # the block on its own for exactly this case.
             is_accepted = hash_meets_difficulty(pow_hash, job["pool_difficulty"])
             is_block = is_accepted and hash_meets_difficulty(pow_hash, job["network_difficulty"])
 
@@ -384,7 +451,10 @@ class CnStratumServer(BasePoolServer):
     # Launches the submission of a solved block as a background
     # task, with the same one-submission-per-parent sibling
     # guard as the Bitcoin family (see its server.py for the
-    # full rationale). Keyed by the template's prev_hash.
+    # full rationale), keyed by the job's prev_hash and
+    # remembering the last MAX_SUBMITTED_PARENTS parents.
+    # Returns whether a submission was launched — nothing
+    # reads that at the moment, process_share() ignores it.
     #
     # Used by:
     #   - families/cryptonote/server.py — process_share()
@@ -444,7 +514,9 @@ class CnStratumServer(BasePoolServer):
     # Assembles the full block: the job's template blob (which
     # already carries this client's extranonce) with the
     # winning nonce written into the header. The daemon
-    # answers {"status": "OK"} or an in-band error.
+    # accepts with a status of OK; any other answer, or an
+    # in-band error (raised by MoneroRPC.call), is logged and
+    # counts as a rejection.
     #
     # Used by:
     #   - families/cryptonote/server.py — _submit_block_task()

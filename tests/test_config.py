@@ -17,6 +17,13 @@
 #
 #  The settings themselves are covered in tests/test_coins.py.
 #
+#  This module never imports the tests package itself: the
+#  KNF setup validate() runs against is in place because an
+#  earlier module of the run imported tests/__init__.py (or
+#  because the module was named through the package). A
+#  discovery run narrowed to this file alone runs validate()
+#  against the container's real configuration instead.
+#
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
 ############################################################
@@ -54,7 +61,8 @@ PEGIN_VARIABLES = ("MWEB_PEGIN_AMOUNT", "MWEB_PEGIN_WALLET", "MWEB_PEGIN_FEE_RAT
 # the given peg-in settings in it, for one validate() call.
 #
 # Used by:
-#   - TestCoinSettingsValidation (below)
+#   - TestCoinSettingsValidation (below) — its two KNF test
+#     cases
 ############################################################
 
 def knf_with(settings):
@@ -77,7 +85,8 @@ def knf_with(settings):
 # the only ones in the environment.
 #
 # Used by:
-#   - TestCoinSettingsValidation (below)
+#   - TestCoinSettingsValidation (below) — its two test
+#     cases on coins without MWEB
 ############################################################
 
 @contextlib.contextmanager
@@ -96,6 +105,16 @@ def coin_without_mweb(coin, address, **environment):
 
 
 
+############################################################
+# TestCoinSettingsValidation
+############################################################
+#
+# config.validate() over the MWEB peg-in settings: KNF with
+# its definition's settings swapped per case, and Bitcoin
+# and Dogecoin with the peg-in variables swapped in the
+# environment.
+############################################################
+
 class TestCoinSettingsValidation(unittest.TestCase):
 
 
@@ -104,6 +123,9 @@ class TestCoinSettingsValidation(unittest.TestCase):
 
 
     ############################################################
+    # test_valid_settings_pass
+    ############################################################
+    #
     # No peg-in settings, an amount alone, and the full set all
     # pass on KNF.
     ############################################################
@@ -119,6 +141,9 @@ class TestCoinSettingsValidation(unittest.TestCase):
 
 
     ############################################################
+    # test_a_problem_stops_the_pool_naming_the_setting
+    ############################################################
+    #
     # A problem in the coin's peg-in settings stops the pool,
     # naming the setting.
     ############################################################
@@ -142,6 +167,9 @@ class TestCoinSettingsValidation(unittest.TestCase):
 
 
     ############################################################
+    # test_peg_in_settings_on_a_coin_without_mweb_stop_the_pool
+    ############################################################
+    #
     # A coin without MWEB carries no peg-in settings, so any
     # in its environment would do nothing — they stop the pool.
     ############################################################
@@ -161,6 +189,9 @@ class TestCoinSettingsValidation(unittest.TestCase):
 
 
     ############################################################
+    # test_coins_without_mweb_pass_without_peg_in_settings
+    ############################################################
+    #
     # The same coins without any peg-in setting pass.
     ############################################################
 

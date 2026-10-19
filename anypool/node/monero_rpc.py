@@ -6,14 +6,17 @@
 #  path plus a set of plain HTTP endpoints (/getheight,
 #  /getinfo). Three differences from the Bitcoin client:
 #
-#    - methods live at {url}/json_rpc, not at /
+#    - methods live under the /json_rpc path of RPC_URL,
+#      not at its root
 #    - no HTTP auth (the 0.11 daemon uses none by default)
-#    - errors come back as {"error": {...}} INSIDE a 200
-#      response; a missing "result" is always a failure
+#    - a refusal comes back as an error object INSIDE an
+#      HTTP 200 answer, and an answer without a result is
+#      always a failure
 #
 #  Used for exactly three calls:
 #
-#    getblocktemplate  — wallet_address + reserve_size ->
+#    getblocktemplate  — asked with the pool's wallet_address
+#                        and a reserve_size, answers with the
 #                        blocktemplate_blob to mine on
 #    submitblock       — hand a solved block blob to the
 #                        network
@@ -43,6 +46,24 @@ DEFAULT_TIMEOUT = 10.0
 
 
 
+############################################################
+# MoneroRPC
+############################################################
+#
+# The client of a CryptoNote daemon, one per pool process:
+# the daemon URL from config and one aiohttp session, opened
+# on first use and shared by both kinds of request the
+# daemon serves — JSON-RPC 2.0 methods through call() and
+# plain endpoints through plain(). It carries no
+# credentials, since the 0.11 daemon runs without HTTP auth.
+#
+# Used by:
+#   - families/cryptonote/server.py — CnStratumServer creates
+#     the instance (getblocktemplate, submitblock)
+#   - families/cryptonote/runner.py — tip_poll_loop() and
+#     the teardown in run(), through server.rpc
+############################################################
+
 class MoneroRPC:
 
 
@@ -54,8 +75,8 @@ class MoneroRPC:
     # __init__
     ############################################################
     #
-    # The session is not created here because aiohttp needs a
-    # running event loop.
+    # Stores RPC_URL from config. The session is not created
+    # here because aiohttp needs a running event loop.
     #
     # Used by:
     #   - families/cryptonote/server.py — CnStratumServer.__init__()
@@ -94,10 +115,11 @@ class MoneroRPC:
     # call
     ############################################################
     #
-    # One JSON-RPC 2.0 call against {url}/json_rpc. Returns the
-    # "result" object; raises on transport errors, non-200
-    # statuses and in-band {"error": ...} answers, so callers
-    # can treat any return value as success.
+    # One JSON-RPC 2.0 call against the daemon's /json_rpc
+    # path. Returns the result object; raises on transport
+    # errors, non-200 statuses, an error object inside the
+    # answer and an answer that carries no result at all, so
+    # callers can treat any return value as success.
     #
     # Used by:
     #   - families/cryptonote/server.py — create_job(), _submit_block()
@@ -136,9 +158,10 @@ class MoneroRPC:
     # plain
     ############################################################
     #
-    # One call against a plain endpoint like /getheight. These
-    # answer a bare JSON object with a "status" field instead
-    # of the JSON-RPC envelope.
+    # One GET against a plain endpoint (only /getheight is
+    # used). These answer a bare JSON object with a "status"
+    # field instead of the JSON-RPC envelope. The object comes
+    # back whole — its status field is left to the caller.
     #
     # Used by:
     #   - families/cryptonote/runner.py — height poll loop
@@ -166,7 +189,7 @@ class MoneroRPC:
     # Graceful shutdown of the shared HTTP session.
     #
     # Used by:
-    #   - families/cryptonote/runner.py — on server shutdown
+    #   - families/cryptonote/runner.py — run() teardown
     ############################################################
 
     async def close(self) -> None:

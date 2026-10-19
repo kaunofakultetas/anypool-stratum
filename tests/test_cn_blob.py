@@ -32,6 +32,15 @@ from tests import cn_vectors
 
 
 
+############################################################
+# TestParseBlock
+############################################################
+#
+# parse_block() on the real final block: every byte
+# accounted for, and a blob with bytes too many or too few
+# refused instead of mis-parsed.
+############################################################
+
 class TestParseBlock(unittest.TestCase):
 
 
@@ -40,6 +49,9 @@ class TestParseBlock(unittest.TestCase):
 
 
     ############################################################
+    # test_parse_final_block
+    ############################################################
+    #
     # The final block of the original chain parses with every
     # byte accounted for.
     ############################################################
@@ -59,6 +71,9 @@ class TestParseBlock(unittest.TestCase):
 
 
     ############################################################
+    # test_trailing_bytes_rejected
+    ############################################################
+    #
     # A blob with extra bytes after the tx hashes must raise —
     # every byte has to be accounted for, never mis-parsed.
     ############################################################
@@ -74,6 +89,9 @@ class TestParseBlock(unittest.TestCase):
 
 
     ############################################################
+    # test_truncated_blob_rejected
+    ############################################################
+    #
     # A blob cut short must raise as well (the varint reader
     # surfaces truncation as IndexError, structural checks as
     # ValueError — either way, never a quiet mis-parse).
@@ -91,6 +109,16 @@ class TestParseBlock(unittest.TestCase):
 
 
 
+############################################################
+# TestBlockId
+############################################################
+#
+# block_id() recomputed for real blocks carrying no, one and
+# three mempool transactions, against the ids the network
+# reports — the parsing, the keccak, the miner tx hash and
+# the tree hash all have to be right for these to match.
+############################################################
+
 class TestBlockId(unittest.TestCase):
 
 
@@ -99,6 +127,9 @@ class TestBlockId(unittest.TestCase):
 
 
     ############################################################
+    # test_final_block_id
+    ############################################################
+    #
     # The final block of the original chain: its recomputed id
     # must equal what the network reports (miner tx only — a
     # single tree leaf).
@@ -114,6 +145,9 @@ class TestBlockId(unittest.TestCase):
 
 
     ############################################################
+    # test_block_with_one_tx
+    ############################################################
+    #
     # A block carrying one mempool tx: two tree leaves, the
     # simplest real pairing case.
     ############################################################
@@ -129,6 +163,9 @@ class TestBlockId(unittest.TestCase):
 
 
     ############################################################
+    # test_block_with_three_txs
+    ############################################################
+    #
     # A block carrying three mempool txs: four tree leaves,
     # exercising the power-of-two reduction of tree_hash.
     ############################################################
@@ -145,6 +182,15 @@ class TestBlockId(unittest.TestCase):
 
 
 
+############################################################
+# TestTreeHash
+############################################################
+#
+# tree_hash() on its own, leaf count by leaf count, pinning
+# where CryptoNote's tree differs from Bitcoin's merkle
+# tree.
+############################################################
+
 class TestTreeHash(unittest.TestCase):
 
 
@@ -153,6 +199,9 @@ class TestTreeHash(unittest.TestCase):
 
 
     ############################################################
+    # test_single_leaf_is_itself
+    ############################################################
+    #
     # One leaf hashes to itself — no keccak round at all.
     ############################################################
 
@@ -166,6 +215,9 @@ class TestTreeHash(unittest.TestCase):
 
 
     ############################################################
+    # test_two_leaves
+    ############################################################
+    #
     # Two leaves: exactly one pair hash.
     ############################################################
 
@@ -179,9 +231,12 @@ class TestTreeHash(unittest.TestCase):
 
 
     ############################################################
-    # Three leaves: CryptoNote pair-hashes the TAIL (b, c)
-    # first and leaves the head alone — not Bitcoin's
-    # duplicate-the-last-leaf padding.
+    # test_three_leaves_pairs_the_tail
+    ############################################################
+    #
+    # Three leaves: CryptoNote pair-hashes the TAIL — the last
+    # two leaves — first and leaves the head alone, not
+    # Bitcoin's duplicate-the-last-leaf padding.
     ############################################################
 
     def test_three_leaves_pairs_the_tail(self):
@@ -195,6 +250,9 @@ class TestTreeHash(unittest.TestCase):
 
 
     ############################################################
+    # test_empty_rejected
+    ############################################################
+    #
     # No leaves is a caller bug and must raise.
     ############################################################
 
@@ -209,6 +267,14 @@ class TestTreeHash(unittest.TestCase):
 
 
 
+############################################################
+# TestHashingBlob
+############################################################
+#
+# hashing_blob(): the short blob miners actually hash,
+# derived from a full block.
+############################################################
+
 class TestHashingBlob(unittest.TestCase):
 
 
@@ -217,8 +283,12 @@ class TestHashingBlob(unittest.TestCase):
 
 
     ############################################################
-    # The classic 76-byte layout: header(43) + root(32) +
-    # tx count varint(1).
+    # test_hashing_blob_layout
+    ############################################################
+    #
+    # The classic 76-byte layout: the block's 43-byte header
+    # copied verbatim, the 32-byte tree root, then the
+    # transaction count as a one-byte varint.
     ############################################################
 
     def test_hashing_blob_layout(self):
@@ -237,6 +307,16 @@ class TestHashingBlob(unittest.TestCase):
 
 
 
+############################################################
+# TestInjection
+############################################################
+#
+# with_nonce() and with_extranonce(): writing a miner's
+# nonce or a client's extranonce into a blob without
+# disturbing any other byte, and refusing an extranonce the
+# reserved space cannot hold.
+############################################################
+
 class TestInjection(unittest.TestCase):
 
 
@@ -245,8 +325,12 @@ class TestInjection(unittest.TestCase):
 
 
     ############################################################
-    # Nonce injection: only the 4 nonce bytes change, and the
-    # hashing blob of a template picks the change up.
+    # test_with_nonce
+    ############################################################
+    #
+    # Nonce injection: the 4 bytes at the nonce offset take
+    # the new nonce, and every other byte of the blob stays
+    # as it was.
     ############################################################
 
     def test_with_nonce(self):
@@ -266,6 +350,9 @@ class TestInjection(unittest.TestCase):
 
 
     ############################################################
+    # test_with_extranonce_changes_work
+    ############################################################
+    #
     # Extranonce injection into a REAL template: the blob
     # still parses, and distinct extranonces yield distinct
     # hashing blobs (each miner gets unique work).
@@ -289,6 +376,9 @@ class TestInjection(unittest.TestCase):
 
 
     ############################################################
+    # test_extranonce_too_large_rejected
+    ############################################################
+    #
     # An extranonce longer than the reserved space would
     # overwrite real template bytes — must raise.
     ############################################################

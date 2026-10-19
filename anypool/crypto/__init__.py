@@ -13,11 +13,13 @@
 #    bech32.py      — BIP-173 address decoding (P2WPKH)
 #    base58.py      — base58check decoding (P2PKH)
 #    keccak.py      — keccak-256 with CryptoNote's original
-#                     padding, plus the CN tree hash
+#                     padding (the CN tree hash built on it
+#                     lives in families/cryptonote/blob.py)
 #    cn_base58.py   — CryptoNote block-base58 addresses +
 #                     varints
 #    cryptonight.py — CryptoNight PoW via the py-cryptonight
-#                     C extension
+#                     C extension, plus the CryptoNote
+#                     difficulty math
 #
 #  Used by:
 #    - anypool/families/ — both mining engines

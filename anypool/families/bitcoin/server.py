@@ -12,8 +12,9 @@
 #  and orchestrates the three flows that make a pool a pool:
 #
 #    create_job()      — poll getblocktemplate, cut a fresh
-#                        job when the chain tip moves, and
-#                        broadcast it to every miner.
+#                        job when the work changes (or the
+#                        current job's ntime grows stale),
+#                        and broadcast it to every miner.
 #    process_share()   — validate a submitted share against
 #                        pool and network targets.
 #    _start_block_submission() — launch the submission of a
@@ -81,6 +82,30 @@ MWEB_STALL = object()
 
 
 
+############################################################
+# StratumServer
+############################################################
+#
+# The pool-wide half of a Bitcoin-family pool: one instance
+# per process, shared by every miner connection. On top of
+# the client registry and statistics of BasePoolServer it
+# owns the node RPC client, the JobManager, the pool and
+# network difficulty and target state, the extranonce1
+# counter, the sibling-block guard and — on coins with MWEB
+# — the MwebWatch.
+#
+# Work that could hold up a miner's conversation — job
+# broadcasts to every socket, block submissions to the node,
+# the MWEB deployment read — runs as background tasks, so
+# the answer to a share never waits for any of it.
+#
+# Used by:
+#   - families/bitcoin/runner.py — run() creates the single
+#     instance and hands it to the listener and both loops
+#   - families/bitcoin/connection.py — every connection
+#     calls into the instance it was handed
+############################################################
+
 class StratumServer(BasePoolServer):
 
 
@@ -135,10 +160,10 @@ class StratumServer(BasePoolServer):
     # calculate_mining_target
     ############################################################
     #
-    # difficulty -> target. A share is valid when its hash,
-    # read as a 256-bit integer, is at or below the target.
-    # The difficulty-1 reference target comes from the active
-    # coin's definition.
+    # Turns a difficulty into the target a share must meet: a
+    # share is valid when its hash, read as a 256-bit integer,
+    # is at or below the target. The difficulty-1 reference
+    # target comes from the active coin's definition.
     #
     # Used by:
     #   - families/bitcoin/server.py — __init__() and create_job()
@@ -156,8 +181,12 @@ class StratumServer(BasePoolServer):
     # calculate_mining_difficulty
     ############################################################
     #
-    # target -> difficulty. The inverse of the above, used to
-    # express the network target as a human-readable number.
+    # Turns a target back into a difficulty — the inverse of
+    # the above, used to express the network target as a
+    # human-readable number. Integer division: a target
+    # easier than difficulty 1 (a regtest chain) comes out as
+    # 0, and with POLL_DIFF_DROPPER on, create_job() then
+    # makes that 0 the pool difficulty miners are sent.
     #
     # Used by:
     #   - families/bitcoin/server.py — create_job()
@@ -197,14 +226,18 @@ class StratumServer(BasePoolServer):
     ############################################################
     #
     # Pushes the current job to every connected miner: first a
-    # mining.set_difficulty, then the mining.notify with
-    # clean_jobs=True (miners must abandon the previous job).
+    # mining.set_difficulty, then the mining.notify. Its
+    # clean_jobs flag tells miners whether to abandon their
+    # in-flight work — on for new work, off when create_job()
+    # only re-issues the same work with a fresh ntime.
     # Clients that fail to receive are treated as disconnected
     # and removed.
     #
     # Used by:
-    #   - families/bitcoin/server.py — create_job()
-    #   - families/bitcoin/runner.py — after the initial job
+    #   - families/bitcoin/server.py — create_job(), as a
+    #     background task
+    #   - families/bitcoin/runner.py — run(), after the initial
+    #     job (a no-op there: no miner can be connected yet)
     ############################################################
 
     async def broadcast_new_job(self, clean_jobs: bool = True) -> None:
@@ -252,14 +285,18 @@ class StratumServer(BasePoolServer):
     #
     #   1. getblocktemplate from the node (_fetch_template).
     #   2. If it describes the work we are already mining
-    #      (same tip / mweb / target), keep the current job —
+    #      (same tip, MWEB data and target) and the current
+    #      job's ntime is still fresh, keep the current job —
     #      miners hate pointless restarts.
     #   3. Otherwise refresh the difficulty/target state
     #      (optionally dropping pool difficulty to network
-    #      difficulty, see POLL_DIFF_DROPPER); on a new tip the
-    #      MWEB watch reads the deployment state in the
-    #      background.
-    #   4. Build, store and broadcast the new job.
+    #      difficulty, see POLL_DIFF_DROPPER); when the work
+    #      changed, the MWEB watch reads the deployment state
+    #      in the background.
+    #   4. Build, store and broadcast the new job. The same
+    #      work under a stale ntime (JOB_NTIME_REFRESH_SECONDS)
+    #      goes out without clean_jobs, so miners keep their
+    #      in-flight work.
     #
     # Returns the current job, or None when the node call or
     # job construction failed (the refresh loop just retries)
@@ -313,6 +350,9 @@ class StratumServer(BasePoolServer):
                     self.pool_difficulty = self.network_difficulty
                     self.pool_target = self.network_target
 
+            # Not only a new tip lands here: a target or MWEB data
+            # change on the same tip is new work too, and the panel
+            # then announces the unchanged tip as a new block
             if not same_work:
                 display.new_block_panel(template["height"] - 1, template["previousblockhash"])
                 if self.mweb is not None:
@@ -374,7 +414,7 @@ class StratumServer(BasePoolServer):
     # may peg coins in. After its peg-in the template is asked
     # for again at once; while the stall lasts MWEB_STALL comes
     # back instead of an error on every poll. Any other failure
-    # is raised to create_job() as before.
+    # is raised to create_job().
     #
     # Used by:
     #   - create_job() (above)
@@ -405,25 +445,29 @@ class StratumServer(BasePoolServer):
     #
     # Judges one submitted share:
     #
-    #   1. Look up the EXACT job the miner worked on (stale
-    #      job id -> reject).
+    #   1. Look up the EXACT job the miner worked on; a stale
+    #      or unknown job id is rejected.
     #   2. Cheap sanity gates: ntime inside the allowed window,
     #      not a duplicate of an earlier submission.
     #   3. Rebuild the header the miner hashed and its PoW
     #      hash (shares.build_header).
-    #   4. hash <= pool target?     -> share accepted.
-    #      hash <= network target?  -> it is a full block:
-    #      launch its submission as a background task
-    #      (_start_block_submission) and answer the miner
-    #      right away.
+    #   4. A hash at or below the job's pool target is an
+    #      accepted share; one at or below its network target
+    #      is a full block — accepted even when it misses the
+    #      share target — whose submission is launched as a
+    #      background task (_start_block_submission) before
+    #      the miner gets its answer.
     #
-    # Returns (accepted, error): accepted travels back to the
-    # miner as the mining.submit result, error is a standard
-    # stratum error tuple (or None) shown in the miner's log.
+    # Returns a pair: whether the share was accepted (the
+    # mining.submit result the miner gets back) and a standard
+    # stratum error tuple, or None, shown in the miner's log.
     # The verdict deliberately does NOT depend on the node's
     # submitblock outcome — the share met the target it was
     # issued for, and waiting on the node here would hold the
     # response (and the whole connection) hostage.
+    #
+    # worker_name is accepted but never read: shares are only
+    # counted pool-wide, not per worker.
     #
     # Used by:
     #   - families/bitcoin/connection.py — handle_submit()
@@ -629,8 +673,9 @@ class StratumServer(BasePoolServer):
     # the same build_header() call that validated the share,
     # so header and block body cannot disagree.
     #
-    # submitblock returns null on success and an error string
-    # ("bad-txnmrklroot", "high-hash", ...) on rejection.
+    # submitblock answers null when the node accepted the
+    # block and the node's reject reason otherwise; the reason
+    # is logged as it came.
     #
     # Used by:
     #   - families/bitcoin/server.py — _submit_block_task()

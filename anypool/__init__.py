@@ -4,12 +4,13 @@
 #  Stratum mining pool server, split by responsibility:
 #
 #    config.py     — environment variables + validation
-#    display.py    — all console panels (boxen)
+#    display.py    — all console panels (pyboxen boxes)
 #
 #    coins/        — per-coin definitions + registry
 #                    (add new coins HERE, nowhere else)
 #    crypto/       — pure primitives (hashing, merkle,
-#                    bech32, keccak, cn_base58, cryptonight)
+#                    bech32, base58, keccak, cn_base58,
+#                    cryptonight)
 #    families/     — one subpackage per MINING MODEL:
 #                    bitcoin/ (stratum v1, coinbase+merkle)
 #                    cryptonote/ (login/job/submit, blobs)
@@ -27,6 +28,11 @@
 #        coins/
 #           |
 #        crypto/       config.py, display.py
+#
+#  config.py and display.py sit at the bottom: every layer
+#  may read them. The one upward reach is config.validate(),
+#  which imports coins/ inside the function to check the
+#  selected coin and its reward address.
 #
 #  Used by:
 #    - main.py — the entry point one directory up

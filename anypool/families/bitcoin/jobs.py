@@ -23,8 +23,10 @@
 #    merkle_branch  — sibling hashes proving the coinbase
 #    version/nbits/ntime — big-endian hex, as sent to miners
 #    height         — block height being mined
-#    template       — the raw getblocktemplate result
-#                     (needed later for block submission)
+#    seen_shares    — every share already submitted for this
+#                     job (the duplicate guard)
+#    template       — the raw getblocktemplate result (block
+#                     submission, longpollid, MWEB data)
 #
 #  families/bitcoin/server.py additionally snapshots the difficulty
 #  state the job was issued under (pool_difficulty,
@@ -33,7 +35,12 @@
 #  actually given — not the state of a newer job.
 #
 #  Used by:
-#    - families/bitcoin/server.py — create_job(), process_share()
+#    - families/bitcoin/server.py — create_job() builds and
+#      stores jobs, process_share() looks them up
+#    - families/bitcoin/connection.py — handle_subscribe()
+#      sends the current job
+#    - families/bitcoin/runner.py — longpoll_loop() reads the
+#      current job's longpollid
 ############################################################
 
 
@@ -71,6 +78,7 @@ MAX_STORED_JOBS = 10
 #   - build_job() and JobManager.is_same_work() (below) —
 #     the latter is create_job()'s "did the tip move?" check
 #   - tests/test_server.py — expected follow-up job fields
+#   - tests/test_jobs.py — test_stratum_prevhash
 ############################################################
 
 def stratum_prevhash(prevhash_be: str) -> str:
@@ -173,6 +181,29 @@ def build_job(template: Dict, job_id: str) -> Dict:
 
 
 
+############################################################
+# JobManager
+############################################################
+#
+# The job store of one pool process. Jobs are kept by id,
+# oldest first, so a share is always judged against the
+# exact job the miner was given — even moments after a
+# newer one went out — while anything beyond
+# MAX_STORED_JOBS is dropped. It also tracks the current
+# job, the one every broadcast and new subscriber gets, and
+# the id counter. Each job carries its own duplicate-share
+# record, so pruning a job forgets its shares with it.
+#
+# Used by:
+#   - families/bitcoin/server.py — StratumServer owns one:
+#     create_job() fills it, process_share() reads it,
+#     broadcast_new_job() sends its current job
+#   - families/bitcoin/connection.py — handle_subscribe()
+#     reads the current job
+#   - families/bitcoin/runner.py — longpoll_loop() reads the
+#     current job's longpollid
+############################################################
+
 class JobManager:
 
 
@@ -205,7 +236,8 @@ class JobManager:
     # next_job_id
     ############################################################
     #
-    # Hands out the next unique job id ("00000001", ...).
+    # Hands out the next unique job id: the sequence counter,
+    # bumped by one and rendered as 8 zero-padded hex chars.
     #
     # Used by:
     #   - families/bitcoin/server.py — create_job()
@@ -226,9 +258,11 @@ class JobManager:
     #
     # True when a freshly fetched template describes the work
     # we are already mining: same chain tip, same MWEB data,
-    # same network target. When true the caller must NOT cut a
-    # new job — miners would needlessly restart on identical
-    # work.
+    # same network target. The caller then keeps the current
+    # job — miners would needlessly restart on identical work
+    # — until its ntime grows stale; create_job() re-issues
+    # the same work with a fresh ntime then, without asking
+    # miners to drop what they are hashing.
     #
     # Used by:
     #   - families/bitcoin/server.py — create_job()
@@ -300,12 +334,21 @@ class JobManager:
     ############################################################
     #
     # Duplicate-share guard. Returns True the FIRST time this
-    # exact (extranonce1, extranonce2, ntime, nonce, version
-    # bits) combination is submitted for the job, False on every
-    # resubmission — without this, one winning share could be
-    # replayed forever to inflate a miner's accepted-share count.
-    # Version bits are part of the key because a version-rolling
-    # miner legitimately reuses a nonce under different bits.
+    # exact combination of extranonce1, extranonce2, ntime,
+    # nonce and version bits is submitted for the job, False
+    # on every resubmission — without this, one winning share
+    # could be replayed forever to inflate a miner's
+    # accepted-share count. Version bits are part of the key
+    # because a version-rolling miner legitimately reuses a
+    # nonce under different bits.
+    #
+    # Two gaps remain. The key holds the hex strings as
+    # submitted, so the same share with its hex digits in
+    # another letter case passes as new. And the record is
+    # per job: a same-work re-issue with a fresh ntime
+    # (create_job() in server.py) built from an unchanged
+    # template hashes identically, so one share counts again
+    # under each such job id still stored.
     #
     # Used by:
     #   - families/bitcoin/server.py — process_share()

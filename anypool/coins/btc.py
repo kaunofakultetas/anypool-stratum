@@ -3,16 +3,16 @@
 #
 #  The original. SHA256d PoW — the PoW hash IS the block
 #  hash, unlike Scrypt coins where the two differ. Native
-#  segwit (bech32 "bc1q..." addresses, P2WPKH payout script)
-#  and the mandatory "segwit" GBT rule: Bitcoin Core refuses
+#  segwit (bech32 addresses, P2WPKH payout script) and the
+#  mandatory "segwit" GBT rule: Bitcoin Core refuses
 #  getblocktemplate without it.
 #
 #  Three networks:
-#    mainnet  — "bc1q..." addresses
-#    testnet3 — "tb1q..." addresses (original testnet)
-#    testnet4 — "tb1q..." addresses (BIP94 testnet; same
-#               address prefixes as testnet3, only the chain
-#               and the node differ)
+#    mainnet  — bech32 prefix bc
+#    testnet3 — bech32 prefix tb (the original testnet)
+#    testnet4 — bech32 prefix tb as well (the BIP94 testnet;
+#               same address prefixes as testnet3, only the
+#               chain and the node differ)
 #
 #  The difficulty-1 target is Bitcoin's classic bdiff
 #  reference (0x1d00ffff expanded). Note it is 2^16 times

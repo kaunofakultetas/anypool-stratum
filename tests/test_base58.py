@@ -19,6 +19,7 @@ from anypool.crypto.hashing import sha256d
 
 
 # Well-known Dogecoin mainnet address and its hash160
+# (tests/test_coins.py imports both)
 DOGE_ADDR = "DH5yaieqoZN36fDVciNyRueRGvGLR3mr7L"
 DOGE_HASH160 = "830a7420e63d76244ff7cbd1c248e94c14463259"
 DOGE_VERSION_MAINNET = 0x1e
@@ -39,7 +40,7 @@ DOGE_VERSION_MAINNET = 0x1e
 # round-trip through itself.
 #
 # Used by:
-#   - tests/test_base58.py — property tests below
+#   - test_round_trip (below)
 ############################################################
 
 def reference_base58check_encode(version: int, payload: bytes) -> str:
@@ -63,6 +64,15 @@ def reference_base58check_encode(version: int, payload: bytes) -> str:
 
 
 
+############################################################
+# TestDogecoinAddress
+############################################################
+#
+# A real Dogecoin mainnet address through the decoder and
+# the P2PKH script builder, including the version-byte check
+# that keeps a wrong-network address out of the coinbase.
+############################################################
+
 class TestDogecoinAddress(unittest.TestCase):
 
 
@@ -71,6 +81,9 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
     ############################################################
+    # test_known_address_decodes
+    ############################################################
+    #
     # The known Dogecoin address must decode to its documented
     # version byte and hash160.
     ############################################################
@@ -86,7 +99,11 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
     ############################################################
-    # And it must produce the standard P2PKH scriptPubKey.
+    # test_known_address_to_script
+    ############################################################
+    #
+    # The same address must produce the standard P2PKH
+    # scriptPubKey around its hash160.
     ############################################################
 
     def test_known_address_to_script(self):
@@ -99,8 +116,12 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
     ############################################################
-    # The same address with a wrong expected version (e.g. the
-    # testnet byte) must be refused — wrong-network guard.
+    # test_wrong_network_rejected
+    ############################################################
+    #
+    # The same address with a wrong expected version (here the
+    # Dogecoin testnet byte) must be refused — wrong-network
+    # guard.
     ############################################################
 
     def test_wrong_network_rejected(self):
@@ -114,6 +135,15 @@ class TestDogecoinAddress(unittest.TestCase):
 
 
 
+############################################################
+# TestBase58checkDecode
+############################################################
+#
+# base58check_decode() against the independent encoder
+# above, and against strings that are not Base58Check at
+# all.
+############################################################
+
 class TestBase58checkDecode(unittest.TestCase):
 
 
@@ -122,6 +152,9 @@ class TestBase58checkDecode(unittest.TestCase):
 
 
     ############################################################
+    # test_round_trip
+    ############################################################
+    #
     # Round trip: whatever the reference encoder produces, the
     # decoder must take apart again — including payloads with
     # leading zero bytes (the '1'-padding corner case).
@@ -149,6 +182,9 @@ class TestBase58checkDecode(unittest.TestCase):
 
 
     ############################################################
+    # test_malformed_inputs
+    ############################################################
+    #
     # Corrupted checksums, invalid characters and too-short
     # strings must all raise.
     ############################################################

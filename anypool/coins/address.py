@@ -6,26 +6,29 @@
 #  scriptPubKey. Three schemes cover every coin this pool
 #  targets:
 #
-#    Bech32P2WPKH — native segwit addresses ("ltc1...",
-#                   "knf1..."), producing a P2WPKH script.
-#    Base58P2PKH  — legacy addresses of older forks with no
-#                   segwit (Dogecoin "D...", etc.),
-#                   producing a P2PKH script.
-#    CryptoNoteAddress — CryptoNote addresses ("4...");
-#                   validate-only, the daemon builds the
-#                   coinbase itself.
+#    Bech32P2WPKH      — native segwit (bech32) addresses of
+#                        BTC, LTC and KNF, paid through a
+#                        P2WPKH script.
+#    Base58P2PKH       — legacy base58check addresses of
+#                        older forks with no segwit (DOGE),
+#                        paid through a P2PKH script.
+#    CryptoNoteAddress — CryptoNote addresses (LTL);
+#                        validate-only, the daemon builds
+#                        the coinbase itself.
 #
-#  A scheme is a validate_address(addr, network) callable
-#  plus the list of networks it knows version bytes/prefixes
-#  for (the Bitcoin schemes add payout_script) —
-#  CoinDefinition holds one and the rest of the pool never
-#  asks which format the address is in.
+#  Every scheme offers validate_address, which takes the
+#  address and the network name, and networks, which lists
+#  the networks it knows version bytes or prefixes for; the
+#  Bitcoin schemes add payout_script. The coin definition
+#  holds one, and the rest of the pool never asks which
+#  format the address is in.
 #
 #  Used by:
-#    - coins/base.py       — the address_scheme field
-#    - coins/btc.py, ltc.py, doge.py, knf.py, ltl.py
-#    - families/bitcoin/coinbase.py  — payout output construction
-#    - config.py           — validate() REWARD_ADDR check
+#    - coins/btc.py, doge.py, knf.py, ltc.py, ltl.py — one
+#      scheme each
+#    - coins/base.py — the address_scheme field, networks()
+#    - families/bitcoin/coinbase.py — the payout output
+#    - config.py — validate(), the REWARD_ADDR check
 ############################################################
 
 
@@ -41,6 +44,24 @@ from anypool.crypto.bech32 import p2wpkh_script_for_address
 
 
 
+############################################################
+# Bech32P2WPKH
+############################################################
+#
+# The address scheme of the segwit coins: the reward address
+# is a native segwit (bech32, witness version 0) address,
+# and the coinbase pays it through a P2WPKH script. Networks
+# differ only in the address's human-readable prefix, so the
+# scheme holds nothing but that prefix per network — the
+# decoding itself lives in crypto/bech32.py.
+#
+# Used by:
+#   - coins/btc.py, coins/knf.py, coins/ltc.py — their
+#     address_scheme
+#   - families/bitcoin/coinbase.py — payout_script()
+#   - config.py — validate(), through validate_address()
+############################################################
+
 class Bech32P2WPKH:
 
 
@@ -52,8 +73,9 @@ class Bech32P2WPKH:
     # __init__
     ############################################################
     #
-    # Takes the bech32 human-readable prefix per network,
-    # e.g. {"mainnet": "knf", "testnet": "tknf"}.
+    # Takes the bech32 human-readable prefix for each network
+    # the coin runs on, keyed by the network name COIN_NETWORK
+    # selects.
     #
     # Used by:
     #   - coins/btc.py, coins/ltc.py, coins/knf.py
@@ -89,11 +111,16 @@ class Bech32P2WPKH:
     # payout_script
     ############################################################
     #
-    # Native segwit address -> P2WPKH scriptPubKey hex.
-    # Raises ValueError for wrong-network or malformed input.
+    # Turns a native segwit address into the P2WPKH
+    # scriptPubKey, as hex, that the coinbase pays. Raises
+    # ValueError for wrong-network or malformed input — bar
+    # the two malformed shapes p2wpkh_script_for_address()
+    # in crypto/bech32.py lets escape as other errors.
     #
     # Used by:
-    #   - families/bitcoin/coinbase.py, config.py
+    #   - families/bitcoin/coinbase.py — build_coinbase_parts(),
+    #     the payout output
+    #   - validate_address() (below)
     ############################################################
 
     def payout_script(self, addr: str, network: str) -> str:
@@ -108,12 +135,12 @@ class Bech32P2WPKH:
     # validate_address
     ############################################################
     #
-    # Family-neutral validation entrypoint (config.validate
-    # calls this on every scheme): valid when a payout script
-    # can be derived.
+    # The family-neutral check config.validate() runs on
+    # whichever scheme the selected coin has: an address is
+    # valid when a payout script can be derived from it.
     #
     # Used by:
-    #   - config.py — validate() REWARD_ADDR check
+    #   - config.py — validate(), the REWARD_ADDR check
     ############################################################
 
     def validate_address(self, addr: str, network: str) -> None:
@@ -126,6 +153,23 @@ class Bech32P2WPKH:
 
 
 
+############################################################
+# Base58P2PKH
+############################################################
+#
+# The address scheme of the older forks that never adopted
+# segwit: the reward address is a legacy base58check
+# address, and the coinbase pays it through a P2PKH script.
+# Networks differ only in the version byte at the front of
+# the address, so the scheme holds nothing but that byte per
+# network — the decoding itself lives in crypto/base58.py.
+#
+# Used by:
+#   - coins/doge.py — its address_scheme
+#   - families/bitcoin/coinbase.py — payout_script()
+#   - config.py — validate(), through validate_address()
+############################################################
+
 class Base58P2PKH:
 
 
@@ -137,8 +181,9 @@ class Base58P2PKH:
     # __init__
     ############################################################
     #
-    # Takes the base58check version byte per network,
-    # e.g. Dogecoin: {"mainnet": 0x1e, "testnet": 0x71}.
+    # Takes the base58check version byte for each network the
+    # coin runs on, keyed by the network name COIN_NETWORK
+    # selects.
     #
     # Used by:
     #   - coins/doge.py
@@ -174,11 +219,14 @@ class Base58P2PKH:
     # payout_script
     ############################################################
     #
-    # Legacy address -> P2PKH scriptPubKey hex.
-    # Raises ValueError for wrong-network or malformed input.
+    # Turns a legacy address into the P2PKH scriptPubKey, as
+    # hex, that the coinbase pays. Raises ValueError for
+    # wrong-network or malformed input.
     #
     # Used by:
-    #   - families/bitcoin/coinbase.py, config.py
+    #   - families/bitcoin/coinbase.py — build_coinbase_parts(),
+    #     the payout output
+    #   - validate_address() (below)
     ############################################################
 
     def payout_script(self, addr: str, network: str) -> str:
@@ -193,12 +241,12 @@ class Base58P2PKH:
     # validate_address
     ############################################################
     #
-    # Family-neutral validation entrypoint (config.validate
-    # calls this on every scheme): valid when a payout script
-    # can be derived.
+    # The family-neutral check config.validate() runs on
+    # whichever scheme the selected coin has: an address is
+    # valid when a payout script can be derived from it.
     #
     # Used by:
-    #   - config.py — validate() REWARD_ADDR check
+    #   - config.py — validate(), the REWARD_ADDR check
     ############################################################
 
     def validate_address(self, addr: str, network: str) -> None:
@@ -211,6 +259,24 @@ class Base58P2PKH:
 
 
 
+############################################################
+# CryptoNoteAddress
+############################################################
+#
+# The address scheme of the CryptoNote family. The pool
+# hands the raw address string to the daemon, which builds
+# the coinbase from it, so there is no payout SCRIPT to
+# derive: this scheme only VALIDATES the reward address —
+# checksum, network prefix and key payload — so a mistyped
+# address stops the pool at startup with a readable error.
+# Networks differ only in the prefix varint at the front of
+# the address.
+#
+# Used by:
+#   - coins/ltl.py — its address_scheme
+#   - config.py — validate(), through validate_address()
+############################################################
+
 class CryptoNoteAddress:
 
 
@@ -222,11 +288,9 @@ class CryptoNoteAddress:
     # __init__
     ############################################################
     #
-    # Takes the address prefix varint per network, e.g.
-    # {"mainnet": 18, "testnet": 53}. Unlike the Bitcoin
-    # schemes there is no payout SCRIPT — the daemon builds
-    # the coinbase itself from the raw address string — so
-    # this scheme only knows how to VALIDATE an address.
+    # Takes the address prefix (the varint at the front of
+    # every address) for each network the coin runs on, keyed
+    # by the network name COIN_NETWORK selects.
     #
     # Used by:
     #   - coins/ltl.py
@@ -262,12 +326,14 @@ class CryptoNoteAddress:
     # validate_address
     ############################################################
     #
-    # Full CryptoNote address check: base58 decode, keccak
-    # checksum, network prefix, and the 64-byte spend+view
-    # key payload. Raises ValueError with the reason.
+    # Full CryptoNote address check: block-base58 decode,
+    # keccak checksum, network prefix, and the 64-byte payload
+    # of the public spend and view keys. Raises ValueError
+    # with the reason — bar the crafted shape decode_addr() in
+    # crypto/cn_base58.py lets escape as IndexError.
     #
     # Used by:
-    #   - config.py — validate() REWARD_ADDR check
+    #   - config.py — validate(), the REWARD_ADDR check
     ############################################################
 
     def validate_address(self, addr: str, network: str) -> None:

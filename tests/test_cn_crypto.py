@@ -27,6 +27,16 @@ from tests import cn_vectors
 
 
 
+############################################################
+# TestKeccak
+############################################################
+#
+# keccak_256() against published vectors of ORIGINAL
+# Keccak-256 — the padding CryptoNote hashes with, which
+# hashlib's sha3_256 does not use — plus an input long
+# enough to need more than one sponge block.
+############################################################
+
 class TestKeccak(unittest.TestCase):
 
 
@@ -35,6 +45,9 @@ class TestKeccak(unittest.TestCase):
 
 
     ############################################################
+    # test_empty
+    ############################################################
+    #
     # The published empty-input vector of ORIGINAL Keccak-256.
     # sha3_256 gives a different digest (NIST changed the
     # padding), so this also proves we are not accidentally on
@@ -51,6 +64,9 @@ class TestKeccak(unittest.TestCase):
 
 
     ############################################################
+    # test_abc
+    ############################################################
+    #
     # The published "abc" vector of original Keccak-256.
     ############################################################
 
@@ -64,8 +80,13 @@ class TestKeccak(unittest.TestCase):
 
 
     ############################################################
+    # test_multiblock_input
+    ############################################################
+    #
     # 200 bytes crosses the 136-byte sponge rate, so this
-    # exercises the multi-block absorb path.
+    # exercises the multi-block absorb path — checked only
+    # for the digest length and for one byte less changing
+    # the digest; no published vector pins its value.
     ############################################################
 
     def test_multiblock_input(self):
@@ -79,6 +100,15 @@ class TestKeccak(unittest.TestCase):
 
 
 
+############################################################
+# TestCnBase58
+############################################################
+#
+# cn_base58: CryptoNote's block-wise base58 with its keccak
+# checksum — the layer REWARD_ADDR is validated with — and
+# the varints block parsing borrows from it.
+############################################################
+
 class TestCnBase58(unittest.TestCase):
 
 
@@ -87,6 +117,9 @@ class TestCnBase58(unittest.TestCase):
 
 
     ############################################################
+    # test_encode_decode_roundtrip
+    ############################################################
+    #
     # encode_addr and decode_addr are exact inverses over the
     # address layer used to validate REWARD_ADDR.
     ############################################################
@@ -104,8 +137,12 @@ class TestCnBase58(unittest.TestCase):
 
 
     ############################################################
+    # test_real_address_shape
+    ############################################################
+    #
     # The repo's test address decodes to the canonical shape:
-    # prefix 18, 64-byte spend+view payload, 95 characters.
+    # prefix 18, a 64-byte payload of spend and view keys, 95
+    # characters.
     ############################################################
 
     def test_real_address_shape(self):
@@ -120,6 +157,9 @@ class TestCnBase58(unittest.TestCase):
 
 
     ############################################################
+    # test_corrupted_checksum_rejected
+    ############################################################
+    #
     # Flipping one character breaks the keccak checksum and
     # must be rejected — a typoed REWARD_ADDR dies at startup.
     ############################################################
@@ -136,6 +176,9 @@ class TestCnBase58(unittest.TestCase):
 
 
     ############################################################
+    # test_invalid_character_rejected
+    ############################################################
+    #
     # "0", "O", "I" and "l" are excluded from the base58
     # alphabet and must raise.
     ############################################################
@@ -150,6 +193,9 @@ class TestCnBase58(unittest.TestCase):
 
 
     ############################################################
+    # test_varint_roundtrip
+    ############################################################
+    #
     # write_varint and read_varint are inverses across the
     # 1-byte, 2-byte and multi-byte encodings.
     ############################################################
@@ -168,6 +214,16 @@ class TestCnBase58(unittest.TestCase):
 
 
 
+############################################################
+# TestDifficultyMath
+############################################################
+#
+# The CryptoNote difficulty math of cryptonight.py: the
+# 4-byte compact target a job carries, and the check of a
+# hash against a difficulty that every share and block
+# verdict rests on.
+############################################################
+
 class TestDifficultyMath(unittest.TestCase):
 
 
@@ -176,9 +232,13 @@ class TestDifficultyMath(unittest.TestCase):
 
 
     ############################################################
-    # compact_target of difficulty 5000 is "711b0d00" — the
-    # conventional 4-byte little-endian top of the 256-bit
-    # target that every CryptoNote pool/miner pair agrees on.
+    # test_compact_target_known_value
+    ############################################################
+    #
+    # A known difficulty encodes to the target value
+    # CryptoNote pools hand out for it — the conventional
+    # 4-byte little-endian top of the 256-bit target that
+    # every CryptoNote pool/miner pair agrees on.
     ############################################################
 
     def test_compact_target_known_value(self):
@@ -190,6 +250,9 @@ class TestDifficultyMath(unittest.TestCase):
 
 
     ############################################################
+    # test_compact_target_diff_1
+    ############################################################
+    #
     # Difficulty 1 encodes as all-ones — the loosest target
     # the 4 bytes can express.
     ############################################################
@@ -203,8 +266,12 @@ class TestDifficultyMath(unittest.TestCase):
 
 
     ############################################################
-    # Above 2^32 the 4-byte target would encode as zero and no
-    # share could ever satisfy it — must fail loudly instead.
+    # test_compact_target_rejects_unencodable_difficulty
+    ############################################################
+    #
+    # A difficulty that no longer fits 32 bits would encode
+    # as a zero target that no share could ever satisfy — it
+    # must fail loudly instead.
     ############################################################
 
     def test_compact_target_rejects_unencodable_difficulty(self):
@@ -217,8 +284,12 @@ class TestDifficultyMath(unittest.TestCase):
 
 
     ############################################################
+    # test_zero_hash_meets_anything
+    ############################################################
+    #
     # The zero hash satisfies any difficulty — the trivially
-    # true end of hash * difficulty < 2^256.
+    # true end of the check, as zero times any difficulty
+    # stays under 2^256.
     ############################################################
 
     def test_zero_hash_meets_anything(self):
@@ -230,6 +301,9 @@ class TestDifficultyMath(unittest.TestCase):
 
 
     ############################################################
+    # test_max_hash_only_meets_diff_1
+    ############################################################
+    #
     # The all-ones hash is the worst possible: passes only
     # difficulty 1.
     ############################################################
@@ -245,9 +319,12 @@ class TestDifficultyMath(unittest.TestCase):
 
 
     ############################################################
+    # test_boundary
+    ############################################################
+    #
     # Right at the boundary — hash 2^255 (read little-endian)
     # passes difficulty 1 and fails difficulty 2, pinning the
-    # strict "<" comparison.
+    # strict comparison: a product of exactly 2^256 fails.
     ############################################################
 
     def test_boundary(self):

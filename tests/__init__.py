@@ -1,23 +1,35 @@
 ############################################################
 #  [*] Test Suite Setup
 #
-#  Pins the environment BEFORE any anypool module is imported
-#  (config.py reads os.environ at import time), so the tests
-#  are deterministic no matter what the surrounding container
-#  or shell has configured.
+#  Pins the pool's environment for the tests, so they are
+#  deterministic no matter what the surrounding container
+#  or shell has configured. config.py reads os.environ once,
+#  at import time, so a pin only counts when it lands before
+#  config.py is first imported.
 #
 #  The values match the real KNF mainnet pool that mined
-#  block 1777 on 2026-07-14 — all test vectors in this suite
-#  come from that block's server logs, which the network
-#  accepted, so they are known-good end to end.
+#  block 1777 on 2026-07-14, so the block 1777 vectors in
+#  tests/vectors.py — taken from that pool's server logs and
+#  accepted by the network — are known-good end to end.
 #
-#  Run inside the stratum container (has scrypt installed),
-#  e.g. bitlitas-stratum or knfcoin-stratum:
-#
-#    docker exec <stratum-container> python -m unittest discover -s tests -v
+#  The suite runs under unittest discovery started in this
+#  directory, with the repository root as the working
+#  directory, inside a stratum container — its image has
+#  scrypt and the other dependencies installed. Discovery
+#  started here imports the test modules under their bare
+#  names, so this file runs only when the first of them
+#  imports something from the tests package: test_bech32.py
+#  in a full run, before anything has imported config.py.
+#  A discovery run narrowed by file pattern to one module
+#  that imports pool code ahead of its tests import (many
+#  do, and test_config.py has no tests import at all) lets
+#  config.py read the container's real environment first,
+#  and the pins below land too late.
 #
 #  Used by:
-#    - unittest — imported automatically before test modules
+#    - every test module that imports from the tests package
+#      (a vectors module or another test module) — the first
+#      such import of a run executes this file
 ############################################################
 
 
@@ -32,8 +44,8 @@ os.environ["POOL_DIFFICULTY"] = "100000"
 os.environ["DEBUG"] = "false"
 
 # Pinned OFF so the difficulty-clamp tests see the plain math:
-# on a service running POLL_DIFF_DROPPER=True the dropper would
-# cap requested difficulties at the network difficulty first.
-# The one test that wants the dropper ON patches the config
-# attribute for its own scope (test_cn_server.py).
+# on a service running with POLL_DIFF_DROPPER on, the dropper
+# would cap requested difficulties at the network difficulty
+# first. The one test that wants the dropper ON patches the
+# config attribute for its own scope (test_cn_server.py).
 os.environ["POLL_DIFF_DROPPER"] = "false"

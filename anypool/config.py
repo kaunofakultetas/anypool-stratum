@@ -2,9 +2,8 @@
 #  [*] Pool Configuration
 #
 #  Every pool-wide knob lives here. All values are read from
-#  environment variables once, at import time, so the rest of
-#  the codebase can simply do `from anypool import config`
-#  and use plain attributes.
+#  environment variables once, at import time, so every other
+#  module simply imports this one and reads plain attributes.
 #
 #  Per-coin properties (PoW function, address prefixes, GBT
 #  rules, ...) do NOT live here — see the anypool/coins/
@@ -18,8 +17,19 @@
 #  address crash deep inside the coinbase builder.
 #
 #  Used by:
-#    - main.py       — validate() on startup
-#    - every module  — reads config attributes
+#    - main.py              — validate() on startup
+#    - coins/__init__.py    — active() reads COIN
+#    - display.py           — DEBUG, the startup banner
+#    - families/bitcoin/    — coinbase (REWARD_ADDR,
+#                             COIN_NETWORK, COINBASE_MESSAGE),
+#                             server (pool difficulty and
+#                             its dropper), runner (port)
+#    - families/cryptonote/ — server (REWARD_ADDR, pool
+#                             difficulty and its dropper),
+#                             runner (port)
+#    - node/rpc.py          — RPC_URL, RPC_USER, RPC_PASS
+#    - node/monero_rpc.py   — RPC_URL
+#    - stratum/base.py      — DEBUG, the wire logging
 ############################################################
 
 
@@ -85,7 +95,9 @@ STRATUM_PORT = int(os.getenv("STRATUM_PORT", "3333"))
 POOL_DIFFICULTY = int(os.getenv("POOL_DIFFICULTY", "2048"))
 
 # If the network difficulty drops below the pool difficulty,
-# temporarily lower the pool difficulty to match it.
+# temporarily lower the pool difficulty to match it. The
+# name says POLL, not POOL, and stays that way: it is the
+# spelling the README and the sample compose file document.
 POLL_DIFF_DROPPER = os.getenv("POLL_DIFF_DROPPER", "false").lower() == "true"
 
 
@@ -114,17 +126,20 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 #
 # Called once from main() before anything else starts. Checks
 # that the selected coin/network exists in the coin registry
-# and that REWARD_ADDR is set and carries the right prefix,
-# so a misconfigured pool dies immediately with a readable
-# error instead of failing on the first block template. The
-# coin's own settings are held to the same standard: a coin
-# with MWEB judges its peg-in settings itself, and peg-in
+# and that REWARD_ADDR is set and fully decodes, checksum
+# included, as an address of that coin and network, so a
+# misconfigured pool dies immediately with a readable error
+# instead of failing on the first block template. The coin's
+# own settings are held to the same standard: a coin with
+# MWEB judges its peg-in settings itself, and peg-in
 # settings given for a coin without MWEB would do nothing,
 # so they stop the pool rather than leave the operator
 # believing a peg-in is set up.
 #
-# (The anypool.coins imports are deliberately local — coins
-# imports config, so a module-level import would be a cycle.)
+# (The anypool.coins imports are deliberately local:
+# coins/__init__.py imports config as well, inside active(),
+# and with both sides function-local the two modules can
+# never meet half-initialized in an import cycle.)
 #
 # Used by:
 #   - main.py — startup
@@ -145,9 +160,14 @@ def validate() -> None:
         raise SystemExit("[CONFIG] REWARD_ADDR environment variable is required (address for block rewards)")
 
     # Full decode (checksum and all) through the coin's address
-    # scheme — the exact same code path used later (coinbase
-    # builder / daemon template request), so an address that
-    # passes here cannot fail deeper in.
+    # scheme. For the Bitcoin family that is the exact code path
+    # the coinbase builder takes later, so an address that
+    # passes here cannot fail deeper in; a CryptoNote daemon
+    # parses the address again with its own code. Only
+    # ValueError is caught: the few malformed addresses that
+    # make a decoder raise something else (see
+    # crypto/bech32.py and crypto/cn_base58.py) still stop the
+    # pool, but with a traceback.
     try:
         coin.address_scheme.validate_address(REWARD_ADDR, COIN_NETWORK)
     except ValueError as e:

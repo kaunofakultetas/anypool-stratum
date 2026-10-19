@@ -18,6 +18,8 @@
 from typing import List, Optional, Tuple
 
 
+# BIP-173's 32-character data alphabet, and each character's
+# 5-bit value
 BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 BECH32_CHARKEY = {c: i for i, c in enumerate(BECH32_CHARSET)}
 
@@ -36,7 +38,7 @@ BECH32_CHARKEY = {c: i for i, c in enumerate(BECH32_CHARSET)}
 # checksum verification — not meant to be called directly.
 #
 # Used by:
-#   - bech32.py — bech32_verify_checksum()
+#   - bech32_verify_checksum() (below)
 ############################################################
 
 def bech32_polymod(values: List[int]) -> int:
@@ -61,11 +63,13 @@ def bech32_polymod(values: List[int]) -> int:
 # bech32_hrp_expand
 ############################################################
 #
-# Expands the human-readable part ("tltc", "knf", ...) into
-# the value sequence the checksum is computed over.
+# Expands the human-readable part (the network prefix in
+# front of the last '1') into the value sequence the
+# checksum is computed over: the high bits of every
+# character, a zero, then the low bits of every character.
 #
 # Used by:
-#   - bech32.py — bech32_verify_checksum()
+#   - bech32_verify_checksum() (below)
 ############################################################
 
 def bech32_hrp_expand(hrp: str) -> List[int]:
@@ -86,7 +90,7 @@ def bech32_hrp_expand(hrp: str) -> List[int]:
 # human-readable part and data values.
 #
 # Used by:
-#   - bech32.py — bech32_decode()
+#   - bech32_decode() (below)
 ############################################################
 
 def bech32_verify_checksum(hrp: str, data: List[int]) -> bool:
@@ -103,12 +107,17 @@ def bech32_verify_checksum(hrp: str, data: List[int]) -> bool:
 # bech32_decode
 ############################################################
 #
-# Splits and validates a bech32 string. Returns the tuple
-# (hrp, data-values-without-checksum) or (None, None) on any
-# malformation: mixed case, bad charset, bad checksum, etc.
+# Splits and validates a bech32 string (surrounding
+# whitespace ignored). Returns the human-readable part and
+# the data values with the checksum stripped, or a pair of
+# Nones on any malformation: characters outside printable
+# ASCII, mixed case, no '1' separator, a data part too
+# short to hold the checksum, characters outside the
+# charset, a bad checksum. A data part that is nothing BUT
+# the checksum comes back as an empty value list.
 #
 # Used by:
-#   - bech32.py — p2wpkh_script_for_address()
+#   - p2wpkh_script_for_address() (below)
 ############################################################
 
 def bech32_decode(addr: str) -> Tuple[Optional[str], Optional[List[int]]]:
@@ -155,10 +164,12 @@ def bech32_decode(addr: str) -> Tuple[Optional[str], Optional[List[int]]]:
 #
 # General power-of-2 base conversion (BIP-173 reference
 # implementation). Used to regroup the 5-bit bech32 values
-# into the 8-bit bytes of the witness program.
+# into the 8-bit bytes of the witness program. Returns None
+# when a value does not fit in its bit width or, without
+# padding, when the leftover bits are not a valid zero pad.
 #
 # Used by:
-#   - bech32.py — p2wpkh_script_for_address()
+#   - p2wpkh_script_for_address() (below)
 ############################################################
 
 def convertbits(data: List[int], frombits: int, tobits: int, pad: bool = True) -> Optional[List[int]]:
@@ -196,14 +207,21 @@ def convertbits(data: List[int], frombits: int, tobits: int, pad: bool = True) -
 #
 # The public entry point of this module: decodes a native
 # segwit address, checks it belongs to the expected network
-# (by its prefix), and returns the P2WPKH scriptPubKey hex:
-#
-#     0014 + <20-byte pubkey hash>
-#     ^^^^
-#     OP_0 + push-20
+# (by its prefix), and returns the P2WPKH scriptPubKey as
+# hex — OP_0 and a 20-byte push (0014), then the 20-byte
+# witness program, the pubkey hash.
 #
 # Raises ValueError for a wrong-network address or anything
 # that is not witness v0 / 20 bytes.
+#
+# Known bug, left as is: two malformed shapes that pass the
+# checksum escape as other errors. An address whose data
+# part is only the checksum fails with IndexError reading
+# the witness version, and one whose program bits are not
+# validly padded makes convertbits() return None, which
+# bytes() rejects with TypeError. config.validate() catches
+# only ValueError, so either one stops the pool with a
+# traceback instead of the readable REWARD_ADDR error.
 #
 # Used by:
 #   - coins/address.py — Bech32P2WPKH.payout_script()

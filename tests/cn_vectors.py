@@ -16,8 +16,9 @@
 #    TEST_ADDRESS — prefix-18 address whose spend/view keys
 #                  are the ed25519 basepoint (private key 1 —
 #                  publicly spendable, NEVER use for real
-#                  rewards; exists so tests and first-run
-#                  configs need no wallet)
+#                  rewards; exists so the tests, and the
+#                  template fetch above, need no wallet —
+#                  nothing outside tests/ uses it)
 #
 #  Used by:
 #    - tests/test_cn_blob.py, test_cn_crypto.py,
@@ -31,6 +32,7 @@ TEST_ADDRESS = "44yQXfkWZNmJ8QgRfFWTzmJ8QgRfFWTzmJ8QgRfFWTzmJ7suhUXwdrDJ8QgRfFWT
 BLOCK_46860_BLOB = "0101f4e7b9d4056acb63b718caab84aa8d3add659c3d6c673e20b4c130c84bbc018e51d363a324e0066c5a01c8ee0201ff8cee0206c1b8b59f0202c87c64639484fcabaeb856fdc5fb58050cab40260ed1c6ef236dea530887c54c80bcc1960b020827f73199f0bf1ab02cb361e4447a3f381c3dd74f89b2095e261baf1f742b5d8090dfc04a023b0e4a2d7eaa76122b868ac45f431d36c83fa7aaa6262898986a162f5922c05e8080dd9da417020a0897f27965acfbdf863322edd0586c217a8dd42eb57dadc05198f5b930fe1380c0f9decfae0102139e70343fdc538a9fdbc7286bcca65bebedcb46cbcf0c147615dced11fb3f6f80c0caf384a302022b773c857d603f82d0a57fa5acdccc1f9157d0ffcb2afb62da1f25ea4fd851aa21015c187863375dc32d1a68a85b74e870888c988810a089803d5a5e12e68c09fd7100"
 BLOCK_46860_ID = "e91688822252bae5269eddfbf174f80d105966abb90329f8c10b91e51e086f34"
 BLOCK_46860_DIFFICULTY = 828711
+# Nothing reads the height at the moment — kept with its block
 BLOCK_46860_HEIGHT = 46860
 
 

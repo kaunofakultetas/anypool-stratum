@@ -2,7 +2,10 @@
 ############################################################
 #  [*] AnyPool — Entry Point
 #
-#  The only file the Dockerfile runs (python -u main.py).
+#  The only file the Dockerfile runs, with Python's output
+#  unbuffered so every panel reaches the container log the
+#  moment it is printed.
+#
 #  Deliberately thin: validates the configuration, resolves
 #  which coin FAMILY the selected coin belongs to (bitcoin
 #  or cryptonote — they speak different stratum dialects and
@@ -11,7 +14,7 @@
 #  package — see anypool/__init__.py for the module map.
 #
 #  Used by:
-#    - Dockerfile — CMD ["python", "-u", "main.py"]
+#    - Dockerfile — its CMD starts the pool with this file
 ############################################################
 
 
@@ -49,6 +52,8 @@ def main():
 
 
 
+# Ctrl+C in an interactive run ends the pool with one line
+# instead of a traceback
 if __name__ == "__main__":
     try:
         main()

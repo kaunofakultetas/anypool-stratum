@@ -21,6 +21,9 @@
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
+#    - tests/test_job_freshness.py, test_mweb.py,
+#      test_mweb_activation.py — import FakeNodeRPC and the
+#      helpers below
 ############################################################
 
 
@@ -51,8 +54,11 @@ from tests import vectors
 # that is busy connecting the previous block.
 #
 # Used by:
-#   - tests/test_server.py — every test case
-#   - tests/test_job_freshness.py, test_mweb_activation.py
+#   - make_server() (below), and through it every test case
+#     here and in tests/test_job_freshness.py
+#   - tests/test_mweb.py — stalled_node() and the MwebWatch
+#     test cases; SlowWallet subclasses it
+#   - tests/test_mweb_activation.py — stalled_server()
 ############################################################
 
 class FakeNodeRPC:
@@ -63,8 +69,17 @@ class FakeNodeRPC:
 
 
     ############################################################
+    # __init__
+    ############################################################
+    #
     # Starts with no template, no queued verdicts, no gate and
     # no answers for any other call.
+    #
+    # Used by:
+    #   - make_server() (below)
+    #   - tests/test_mweb.py — stalled_node(), the MwebWatch
+    #     test cases, and SlowWallet.__init__() through super()
+    #   - tests/test_mweb_activation.py — stalled_server()
     ############################################################
 
     def __init__(self):
@@ -81,6 +96,9 @@ class FakeNodeRPC:
 
 
     ############################################################
+    # call
+    ############################################################
+    #
     # The NodeRPC.call() signature, answered from the fields:
     # submitblock waits on `gate` (when set) then pops a
     # queued verdict; getblocktemplate answers `template`, any
@@ -88,6 +106,15 @@ class FakeNodeRPC:
     # an exception is raised; one that is callable is called
     # with the call's parameters first — how a test lets a
     # peg-in change the template the node serves next.
+    #
+    # Used by:
+    #   - the code under test, wherever it holds this fake as
+    #     its node: StratumServer._fetch_template() and
+    #     _submit_block() (families/bitcoin/server.py),
+    #     MwebWatch.observe(), MwebWatch.diagnose() and
+    #     send_pegin() (families/bitcoin/mweb.py)
+    #   - tests/test_mweb.py — SlowWallet.call() hands every
+    #     call on to it
     ############################################################
 
     async def call(self, method, params=None, timeout=10.0, wallet=None):
@@ -111,7 +138,15 @@ class FakeNodeRPC:
 
 
     ############################################################
+    # calls_to
+    ############################################################
+    #
     # The parameters of every call to one method, in order.
+    #
+    # Used by:
+    #   - tests/test_mweb.py, test_mweb_activation.py — their
+    #     assertions on the node traffic a stall, a peg-in or a
+    #     submission caused (nothing in this file calls it)
     ############################################################
 
     def calls_to(self, method):
@@ -123,7 +158,15 @@ class FakeNodeRPC:
 
 
     ############################################################
+    # submitted_blocks
+    ############################################################
+    #
     # Every block hex handed to submitblock, in call order.
+    #
+    # Used by:
+    #   - TestBackgroundBlockSubmission, TestSiblingBlockGuard
+    #     (below)
+    #   - tests/test_job_freshness.py — TestBlockBelowShareTarget
     ############################################################
 
     def submitted_blocks(self):
@@ -145,7 +188,9 @@ class FakeNodeRPC:
 # into the job exactly the way create_job() does it.
 #
 # Used by:
-#   - tests/test_server.py — the test cases below
+#   - every test case below
+#   - tests/test_job_freshness.py — make_freshness_server()
+#     and TestBlockBelowShareTarget
 ############################################################
 
 def make_server():
@@ -177,7 +222,10 @@ def make_server():
 # submit a different (sibling) solve of the same job.
 #
 # Used by:
-#   - tests/test_server.py — the test cases below
+#   - every test case below but
+#     test_submitted_parents_are_pruned, which starts its
+#     submissions directly
+#   - tests/test_job_freshness.py — TestBlockBelowShareTarget
 ############################################################
 
 async def submit_share(server, job, nonce=vectors.SHARE_NONCE):
@@ -202,7 +250,11 @@ async def submit_share(server, job, nonce=vectors.SHARE_NONCE):
 # a regression can fail the test instead of hanging the run.
 #
 # Used by:
-#   - tests/test_server.py — the test cases below
+#   - every test case below that starts a submission
+#   - tests/test_job_freshness.py — the two broadcast test
+#     cases and TestBlockBelowShareTarget
+#   - tests/test_mweb_activation.py — create_job_printing()
+#     and test_first_mweb_share_submits_the_accepted_block
 ############################################################
 
 async def drain(server):
@@ -227,7 +279,12 @@ async def drain(server):
 # tip. What create_job() should turn into the follow-up job.
 #
 # Used by:
-#   - tests/test_server.py — the test cases below
+#   - test_accepted_block_cuts_new_job_immediately,
+#     test_sibling_block_is_not_submitted and
+#     test_failed_submission_allows_retry_on_parent (below)
+#   - tests/test_job_freshness.py —
+#     test_new_tip_broadcast_cleans_jobs and
+#     TestBlockBelowShareTarget
 ############################################################
 
 def moved_tip_template(new_tip_hash):
@@ -243,6 +300,16 @@ def moved_tip_template(new_tip_hash):
 
 
 
+############################################################
+# TestBackgroundBlockSubmission
+############################################################
+#
+# Block submission run beside the miner's conversation, not
+# inside it: what the miner hears back while the node is
+# still busy, what the node finally receives, and what the
+# pool does once the node has accepted the block.
+############################################################
+
 class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
@@ -251,6 +318,9 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_share_response_does_not_wait_for_node
+    ############################################################
+    #
     # The ASIC-stall guarantee: the mining.submit verdict must
     # come back even while the node has not yet answered
     # submitblock. The fake node hangs on `gate`, so any
@@ -282,10 +352,14 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_submitted_block_is_byte_exact
+    ############################################################
+    #
     # The background submission must hand the node block 1777
-    # as the network accepted it: header + tx count + full
-    # coinbase — without the lone MWEB marker byte the pool
-    # used to append, which a pre-MWEB block never carries.
+    # as the network accepted it: header, transaction count
+    # and full coinbase — without the lone MWEB marker byte
+    # the pool used to append, which a pre-MWEB block never
+    # carries.
     ############################################################
 
     async def test_submitted_block_is_byte_exact(self):
@@ -308,8 +382,12 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # A share above the pool target but below network grade is
-    # just a share — no submission task, no node traffic.
+    # test_plain_share_is_not_submitted
+    ############################################################
+    #
+    # A hash that meets the pool target but not the network
+    # target is just a share — no submission task, no node
+    # traffic.
     ############################################################
 
     async def test_plain_share_is_not_submitted(self):
@@ -331,6 +409,9 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_accepted_block_cuts_new_job_immediately
+    ############################################################
+    #
     # After the node accepts our block, the follow-up job must
     # be cut right away (submitblock returns only once the tip
     # moved) — not seconds later when a poll comes around. The
@@ -361,6 +442,17 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
 
+############################################################
+# TestSiblingBlockGuard
+############################################################
+#
+# The one-submission-per-parent guard in
+# _start_block_submission(), which keeps a second solve of
+# an already submitted parent away from a node still busy
+# with the first — when it holds, when it lets go again,
+# and how much it remembers.
+############################################################
+
 class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
 
 
@@ -369,6 +461,9 @@ class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_sibling_block_is_not_submitted
+    ############################################################
+    #
     # The "inconclusive" scenario: the miner solves the SAME job
     # twice before the clean-jobs notify reaches it. The first
     # solve is submitted; the sibling must be accepted as a
@@ -406,6 +501,9 @@ class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_failed_submission_allows_retry_on_parent
+    ############################################################
+    #
     # A submission the node rejects must unmark the parent, so
     # a later solve on that parent gets its own attempt.
     ############################################################
@@ -436,6 +534,9 @@ class TestSiblingBlockGuard(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
+    # test_submitted_parents_are_pruned
+    ############################################################
+    #
     # The guard's memory must stay bounded and forget the
     # OLDEST parents first — same pruning contract as the
     # JobManager's job store.

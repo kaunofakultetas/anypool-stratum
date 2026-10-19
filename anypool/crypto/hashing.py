@@ -16,7 +16,8 @@
 #    - crypto/merkle.py, crypto/base58.py — sha256d
 #    - coins/ definitions — their pow_hash functions
 #    - families/bitcoin/jobs.py, shares.py, server.py —
-#      field conversions, header assembly, PoW hashing
+#      field conversions, header assembly, coinbase txids
+#      and the block hash shown in the share panel
 ############################################################
 
 
@@ -42,8 +43,12 @@ import hashlib
 # merkle tree nodes and the block hash itself.
 #
 # Used by:
-#   - crypto/merkle.py, crypto/base58.py
-#   - families/bitcoin/ — coinbase, jobs, shares, server
+#   - sha256d_pow_hash() (below)
+#   - crypto/merkle.py — every tree node
+#   - crypto/base58.py — the base58check checksum
+#   - families/bitcoin/jobs.py, shares.py — the coinbase txid
+#   - families/bitcoin/server.py — process_share(), the block
+#     hash in the share panel
 ############################################################
 
 def sha256d(data: bytes) -> bytes:
@@ -60,14 +65,17 @@ def sha256d(data: bytes) -> bytes:
 # scrypt_pow_hash
 ############################################################
 #
-# The Scrypt proof-of-work hash (N=1024, r=1, p=1) used by
-# Litecoin-family coins. Takes the exact 80-byte serialized
-# block header and returns the hash as big-endian hex, ready
-# to be compared numerically against a target.
+# The Scrypt proof-of-work hash used by Litecoin-family
+# coins: N of 1024, r and p of 1, the header serving as its
+# own salt, 32 bytes out. Takes the exact 80-byte serialized
+# block header (ValueError otherwise) and returns the hash
+# as big-endian hex, ready to be compared numerically
+# against a target.
 #
 # Used by:
-#   - families/bitcoin/shares.py — build_header()
-#   - coins/ definitions — as their pow_hash function
+#   - coins/doge.py, knf.py, ltc.py — as their pow_hash,
+#     which families/bitcoin/shares.py build_header() calls
+#     through coins.active()
 ############################################################
 
 def scrypt_pow_hash(header_bytes: bytes) -> str:
@@ -89,11 +97,14 @@ def scrypt_pow_hash(header_bytes: bytes) -> str:
 #
 # The SHA256d proof-of-work hash used by Bitcoin itself. For
 # SHA256 coins the PoW hash IS the block hash — double SHA256
-# of the 80-byte header, rendered big-endian so it can be
-# compared numerically against a target.
+# of the 80-byte header (ValueError for any other length),
+# rendered big-endian so it can be compared numerically
+# against a target.
 #
 # Used by:
-#   - coins/btc.py — as its pow_hash function
+#   - coins/btc.py — as its pow_hash, which
+#     families/bitcoin/shares.py build_header() calls through
+#     coins.active()
 ############################################################
 
 def sha256d_pow_hash(header_bytes: bytes) -> str:
@@ -112,22 +123,15 @@ def sha256d_pow_hash(header_bytes: bytes) -> str:
 # reverse_hex
 ############################################################
 #
-# Reverse a hex string byte-wise (in 2-char chunks). This is
-# how a whole field is flipped between big-endian display
-# form and the little-endian form used inside a serialized
-# block header.
-#
-# INPUT:
-# +---------------------------------------+
-# | 01 | 23 | 45 | 67 | 89 | AB | CD | EF |
-# +---------------------------------------+
-#
-# OUTPUT:
-# +---------------------------------------+
-# | EF | CD | AB | 89 | 67 | 45 | 23 | 01 |
-# +---------------------------------------+
+# Reverses the byte order of a hex string: the pairs of hex
+# characters come back in the opposite order, each pair
+# itself untouched. This is how a whole field is flipped
+# between the big-endian display form and the little-endian
+# form used inside a serialized block header, and flipping
+# twice gives the original back.
 #
 # Used by:
+#   - reverse_hex_4b_chunks() (below)
 #   - families/bitcoin/jobs.py, shares.py, server.py
 ############################################################
 
@@ -145,22 +149,14 @@ def reverse_hex(hex_str: str) -> str:
 # reverse_hex_4b_chunks
 ############################################################
 #
-# Reverse a 32-byte hex string in 4-byte words (8 hex chars
-# each). The stratum protocol transmits the previous block
+# Flips the byte order inside each 4-byte word (8 hex chars)
+# of a 32-byte hex string while the eight words keep their
+# places. The stratum protocol transmits the previous block
 # hash in this odd "word-swapped" form, so both job creation
-# and header assembly need this exact transformation.
-#
-# INPUT:
-# +---------------------------------------------------------------------------------------+
-# | 01234567 | 89ABCDEF | 76543210 | FEDCBA98 | 0123ABCD | EF012345 | 6789ABCD | FEDCBA98 |
-# +---------------------------------------------------------------------------------------+
-#       |         |          |          |          |          |          |          |
-#     FLIP      FLIP       FLIP       FLIP       FLIP       FLIP       FLIP       FLIP
-#       V         |          |          |          |          |          |          |
-# OUTPUT:         V          V          V          V          V          V          V
-# +---------------------------------------------------------------------------------------+
-# | 67452301 | EFCDAB89 | 10325476 | 98BADCFE | CDAB2301 | 452301EF | CDAB8967 | 98BADCFE |
-# +---------------------------------------------------------------------------------------+
+# and header assembly need this exact transformation. Only
+# the first 64 hex chars are processed — anything beyond is
+# dropped silently, which no caller hits: they all pass
+# 32-byte hashes.
 #
 # Used by:
 #   - families/bitcoin/jobs.py, shares.py, server.py

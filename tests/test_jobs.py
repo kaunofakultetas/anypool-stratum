@@ -5,9 +5,10 @@
 #  the block 1777 template into exactly the job the pool
 #  broadcast that day — and a real first MWEB block's
 #  template into a job whose merkle branch covers its peg-in
-#  and HogEx — and the JobManager must store, look up, prune
-#  and recognize unchanged work correctly, new MWEB data
-#  counting as new work.
+#  and HogEx — and the JobManager must store, look up and
+#  prune jobs, refuse replayed shares and recognize
+#  unchanged work correctly, new MWEB data counting as new
+#  work.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -26,6 +27,16 @@ from tests import mweb_vectors, vectors
 
 
 
+############################################################
+# TestBuildJob
+############################################################
+#
+# build_job() and its prevhash conversion, held against jobs
+# the pool really cut — block 1777's, as logged, and the
+# regtest chain's first MWEB block — plus the template shape
+# of daemons that predate the txid field.
+############################################################
+
 class TestBuildJob(unittest.TestCase):
 
 
@@ -34,6 +45,9 @@ class TestBuildJob(unittest.TestCase):
 
 
     ############################################################
+    # test_block_1777_job_fields
+    ############################################################
+    #
     # The block 1777 template must produce the exact job fields
     # the pool logged when it cut job 00000001.
     ############################################################
@@ -57,6 +71,9 @@ class TestBuildJob(unittest.TestCase):
 
 
     ############################################################
+    # test_txid_fallback_for_old_daemons
+    ############################################################
+    #
     # Old daemons (pre-Bitcoin-Core-0.13 forks) provide only a
     # "hash" field per transaction, no "txid" — build_job must
     # fall back to it transparently.
@@ -78,6 +95,9 @@ class TestBuildJob(unittest.TestCase):
 
 
     ############################################################
+    # test_stratum_prevhash
+    ############################################################
+    #
     # The prevhash conversion in isolation: template (BE) form
     # to the word-swapped stratum wire form from the logs.
     ############################################################
@@ -94,9 +114,14 @@ class TestBuildJob(unittest.TestCase):
 
 
     ############################################################
+    # test_first_mweb_block_branch_covers_peg_in_and_hogex
+    ############################################################
+    #
     # The real first MWEB block: the coinbase's merkle branch
     # starts at the peg-in and folds in the HogEx above it —
     # the template's transactions, the HogEx last, all count.
+    # The template rides along in the job whole, since the
+    # block's MWEB section is taken from it at submission.
     ############################################################
 
     def test_first_mweb_block_branch_covers_peg_in_and_hogex(self):
@@ -116,6 +141,16 @@ class TestBuildJob(unittest.TestCase):
 
 
 
+############################################################
+# TestJobManager
+############################################################
+#
+# The JobManager's bookkeeping: jobs stored and found by id,
+# fresh templates told apart from the work already being
+# mined, replayed shares refused, and a store that never
+# grows past MAX_STORED_JOBS.
+############################################################
+
 class TestJobManager(unittest.TestCase):
 
 
@@ -124,6 +159,9 @@ class TestJobManager(unittest.TestCase):
 
 
     ############################################################
+    # test_store_and_get
+    ############################################################
+    #
     # store() must set the current job and get() must find it;
     # unknown ids must return None (stale-share rejection path).
     ############################################################
@@ -143,6 +181,9 @@ class TestJobManager(unittest.TestCase):
 
 
     ############################################################
+    # test_job_id_sequence
+    ############################################################
+    #
     # Job ids must increment as zero-padded hex.
     ############################################################
 
@@ -157,8 +198,13 @@ class TestJobManager(unittest.TestCase):
 
 
     ############################################################
+    # test_is_same_work
+    ############################################################
+    #
     # An identical template (same tip, mweb, target) must be
-    # recognized as the same work — no needless job restarts.
+    # recognized as the same work — no needless job restarts —
+    # while a moved tip or a changed network target is new
+    # work.
     ############################################################
 
     def test_is_same_work(self):
@@ -182,6 +228,9 @@ class TestJobManager(unittest.TestCase):
 
 
     ############################################################
+    # test_new_mweb_data_is_new_work
+    ############################################################
+    #
     # On an MWEB chain the tip can stay while the MWEB data
     # changes (an MWEB transaction arrives): that is new work.
     ############################################################
@@ -201,6 +250,9 @@ class TestJobManager(unittest.TestCase):
 
 
     ############################################################
+    # test_register_share_rejects_duplicates
+    ############################################################
+    #
     # Duplicate-share guard: the first submission of a nonce
     # combination registers, every replay is refused. A fresh
     # job starts with a clean slate.
@@ -231,6 +283,9 @@ class TestJobManager(unittest.TestCase):
 
 
     ############################################################
+    # test_pruning
+    ############################################################
+    #
     # The store must never grow beyond MAX_STORED_JOBS, and it
     # is the OLDEST jobs that get pruned.
     ############################################################
