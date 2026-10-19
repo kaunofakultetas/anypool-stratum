@@ -17,13 +17,6 @@
 #
 #  The settings themselves are covered in tests/test_coins.py.
 #
-#  This module never imports the tests package itself: the
-#  KNF setup validate() runs against is in place because an
-#  earlier module of the run imported tests/__init__.py (or
-#  because the module was named through the package). A
-#  discovery run narrowed to this file alone runs validate()
-#  against the container's real configuration instead.
-#
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
 ############################################################

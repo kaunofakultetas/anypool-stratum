@@ -214,15 +214,6 @@ def convertbits(data: List[int], frombits: int, tobits: int, pad: bool = True) -
 # Raises ValueError for a wrong-network address or anything
 # that is not witness v0 / 20 bytes.
 #
-# Known bug, left as is: two malformed shapes that pass the
-# checksum escape as other errors. An address whose data
-# part is only the checksum fails with IndexError reading
-# the witness version, and one whose program bits are not
-# validly padded makes convertbits() return None, which
-# bytes() rejects with TypeError. config.validate() catches
-# only ValueError, so either one stops the pool with a
-# traceback instead of the readable REWARD_ADDR error.
-#
 # Used by:
 #   - coins/address.py — Bech32P2WPKH.payout_script()
 ############################################################

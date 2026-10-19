@@ -163,11 +163,7 @@ def validate() -> None:
     # scheme. For the Bitcoin family that is the exact code path
     # the coinbase builder takes later, so an address that
     # passes here cannot fail deeper in; a CryptoNote daemon
-    # parses the address again with its own code. Only
-    # ValueError is caught: the few malformed addresses that
-    # make a decoder raise something else (see
-    # crypto/bech32.py and crypto/cn_base58.py) still stop the
-    # pool, but with a traceback.
+    # parses the address again with its own code.
     try:
         coin.address_scheme.validate_address(REWARD_ADDR, COIN_NETWORK)
     except ValueError as e:

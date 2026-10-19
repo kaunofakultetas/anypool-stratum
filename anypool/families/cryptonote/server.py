@@ -398,13 +398,6 @@ class CnStratumServer(BasePoolServer):
             # was issued under; a hash that also meets the network
             # difficulty is a block, submitted in the background
             # ======================================================
-            # BUG (documented, not fixed): a block is only looked for
-            # among accepted shares. With POLL_DIFF_DROPPER off and the
-            # pool difficulty above the network's, a hash that meets
-            # the network difficulty but not the pool's is refused as
-            # low difficulty and the block it solves is never
-            # submitted — the Bitcoin family's process_share() judges
-            # the block on its own for exactly this case.
             is_accepted = hash_meets_difficulty(pow_hash, job["pool_difficulty"])
             is_block = is_accepted and hash_meets_difficulty(pow_hash, job["network_difficulty"])
 

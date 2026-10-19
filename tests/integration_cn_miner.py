@@ -9,8 +9,7 @@
 #  real CryptoNight hash until one meets the job's target,
 #  submits that share and expects an OK status — then
 #  deliberately submits a WRONG result and expects it
-#  refused. The pool normally refuses it as an invalid
-#  share, but the script takes any error as the refusal.
+#  refused.
 #
 #  Run it inside the stratum image (py-cryptonight lives
 #  there), on the same docker network as the pool, from the
@@ -174,10 +173,6 @@ def main():
                     print("[MINER] ✅ SHARE ACCEPTED by pool")
                     accepted = True
                 else:
-                    # Known weakness: the retry mines the SAME job from
-                    # nonce zero again, so it finds and resubmits the very
-                    # same nonce (now a duplicate, or still stale) — only a
-                    # job the pool pushes in between can lead to a new share
                     print(f"[MINER] share rejected: {reply.get('error')} (retrying)")
                 break
         if accepted:

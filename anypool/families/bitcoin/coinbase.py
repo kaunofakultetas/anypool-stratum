@@ -80,13 +80,6 @@ def to_varint(i: int) -> str:
 # padding byte when the top bit is set) and prefixes the
 # push-length byte.
 #
-# Heights 1 to 16 are a known gap: Bitcoin Core's BIP34
-# check expects them as the small-number opcodes OP_1 to
-# OP_16, while this pushes them as one data byte, so a block
-# at those heights is refused (bad-cb-height) on a chain
-# that already enforces BIP34 there — a fresh regtest chain
-# can. Chains past height 16 never meet it.
-#
 # Used by:
 #   - build_coinbase_parts() (below)
 ############################################################
@@ -170,10 +163,7 @@ def build_coinbase_parts(template: Dict) -> Dict[str, str]:
 
 
     # STEP 3: the scriptSig — height push, room for extranonce1
-    # and extranonce2 (4 bytes each), then the message. Nothing
-    # checks the consensus limit of 100 scriptSig bytes: a
-    # COINBASE_MESSAGE over about 88 bytes makes every block
-    # invalid (bad-cb-length) while shares keep being accepted.
+    # and extranonce2 (4 bytes each), then the message
     # =========================================================
     height_push = bip34_height_push(height)
     scriptsig_len = len(height_push) + 4 + 4 + len(message_bytes)

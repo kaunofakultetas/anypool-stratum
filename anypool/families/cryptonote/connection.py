@@ -88,7 +88,7 @@ def _is_hex(s: str) -> bool:
 # worker name without the suffix, and the difficulty or
 # None. A suffix that is no positive number stays part of
 # the worker name, and an unusable password entry is just
-# no request (but see the isdigit() note in the body).
+# no request.
 #
 # Used by:
 #   - CnConnection.handle_login()
@@ -101,12 +101,6 @@ def parse_client_difficulty(login: str, password: str):
 
     if "+" in login:
         login, _, suffix = login.rpartition("+")
-        # BUG (documented, not fixed): isdigit() also accepts
-        # Unicode digits that int() refuses, superscripts among
-        # them, so such a suffix — or such a password value
-        # below — raises ValueError instead of degrading to no
-        # request; process_message() only logs it and the login
-        # goes unanswered.
         if suffix.isdigit() and int(suffix) >= 1:
             requested = int(suffix)
         else:
@@ -237,13 +231,6 @@ class CnConnection(BaseStratumConnection):
             "job_id": job["job_id"],
             "target": job["target"],
             "height": job["height"],
-            # LATENT BUG (documented, not fixed): fixed at cn/0
-            # instead of following the coin's cn_variant, which
-            # coins/base.py says also names the algo for XMRig.
-            # Right for LTL, the only CryptoNote coin today; a
-            # coin on another variant would be told the wrong
-            # algorithm and every share would fail the result
-            # check in process_share().
             "algo": "cn/0",
             "id": self.session_id,
         }

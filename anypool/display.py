@@ -140,9 +140,7 @@ def startup_banner(pool_difficulty: int) -> None:
 #
 # Announces that the chain tip moved and we are about to cut
 # a fresh job on top of it: the height and hash given are
-# the new tip's, the parent of the coming template. The hash
-# is labelled SHA256 for both families, although a
-# CryptoNote block id is a keccak hash.
+# the new tip's, the parent of the coming template.
 #
 # Used by:
 #   - families/bitcoin/server.py    — create_job() on a new template

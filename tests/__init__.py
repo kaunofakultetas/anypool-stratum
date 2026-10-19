@@ -15,16 +15,7 @@
 #  The suite runs under unittest discovery started in this
 #  directory, with the repository root as the working
 #  directory, inside a stratum container — its image has
-#  scrypt and the other dependencies installed. Discovery
-#  started here imports the test modules under their bare
-#  names, so this file runs only when the first of them
-#  imports something from the tests package: test_bech32.py
-#  in a full run, before anything has imported config.py.
-#  A discovery run narrowed by file pattern to one module
-#  that imports pool code ahead of its tests import (many
-#  do, and test_config.py has no tests import at all) lets
-#  config.py read the container's real environment first,
-#  and the pins below land too late.
+#  scrypt and the other dependencies installed.
 #
 #  Used by:
 #    - every test module that imports from the tests package

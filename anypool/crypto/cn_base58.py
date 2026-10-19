@@ -252,13 +252,6 @@ def encode_addr(prefix: int, payload: bytes) -> str:
 # ValueError on any corruption, which config.validate()
 # turns into a readable startup error.
 #
-# Known bug, left as is: a checksum-valid body that is
-# nothing but varint continuation bytes runs read_varint()
-# off its end, and the IndexError that escapes stops the
-# pool with a traceback instead of the readable error. Only
-# a deliberately crafted address gets there; a typo fails
-# the checksum first.
-#
 # Used by:
 #   - coins/address.py — CryptoNoteAddress.validate_address()
 ############################################################

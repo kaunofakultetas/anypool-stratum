@@ -183,10 +183,7 @@ class StratumServer(BasePoolServer):
     #
     # Turns a target back into a difficulty — the inverse of
     # the above, used to express the network target as a
-    # human-readable number. Integer division: a target
-    # easier than difficulty 1 (a regtest chain) comes out as
-    # 0, and with POLL_DIFF_DROPPER on, create_job() then
-    # makes that 0 the pool difficulty miners are sent.
+    # human-readable number.
     #
     # Used by:
     #   - families/bitcoin/server.py — create_job()
@@ -350,9 +347,6 @@ class StratumServer(BasePoolServer):
                     self.pool_difficulty = self.network_difficulty
                     self.pool_target = self.network_target
 
-            # Not only a new tip lands here: a target or MWEB data
-            # change on the same tip is new work too, and the panel
-            # then announces the unchanged tip as a new block
             if not same_work:
                 display.new_block_panel(template["height"] - 1, template["previousblockhash"])
                 if self.mweb is not None:

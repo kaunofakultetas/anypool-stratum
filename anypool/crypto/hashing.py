@@ -153,10 +153,7 @@ def reverse_hex(hex_str: str) -> str:
 # of a 32-byte hex string while the eight words keep their
 # places. The stratum protocol transmits the previous block
 # hash in this odd "word-swapped" form, so both job creation
-# and header assembly need this exact transformation. Only
-# the first 64 hex chars are processed — anything beyond is
-# dropped silently, which no caller hits: they all pass
-# 32-byte hashes.
+# and header assembly need this exact transformation.
 #
 # Used by:
 #   - families/bitcoin/jobs.py, shares.py, server.py

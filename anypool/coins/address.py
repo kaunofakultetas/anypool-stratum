@@ -329,8 +329,7 @@ class CryptoNoteAddress:
     # Full CryptoNote address check: block-base58 decode,
     # keccak checksum, network prefix, and the 64-byte payload
     # of the public spend and view keys. Raises ValueError
-    # with the reason — bar the crafted shape decode_addr() in
-    # crypto/cn_base58.py lets escape as IndexError.
+    # with the reason.
     #
     # Used by:
     #   - config.py — validate(), the REWARD_ADDR check

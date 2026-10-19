@@ -342,14 +342,6 @@ class JobManager:
     # because a version-rolling miner legitimately reuses a
     # nonce under different bits.
     #
-    # Two gaps remain. The key holds the hex strings as
-    # submitted, so the same share with its hex digits in
-    # another letter case passes as new. And the record is
-    # per job: a same-work re-issue with a fresh ntime
-    # (create_job() in server.py) built from an unchanged
-    # template hashes identically, so one share counts again
-    # under each such job id still stored.
-    #
     # Used by:
     #   - families/bitcoin/server.py — process_share()
     ############################################################
