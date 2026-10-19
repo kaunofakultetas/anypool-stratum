@@ -3,17 +3,23 @@
 #
 #  Covers anypool/coins/: every registered coin must be
 #  internally consistent, the getblocktemplate request must
-#  adapt to old daemons (no rules param), and the address
-#  schemes must produce the right payout script types.
+#  adapt to old daemons (no rules param), the address schemes
+#  must produce the right payout script types, and the MWEB
+#  peg-in settings — carried by exactly the coins with MWEB —
+#  must read and judge the environment the way an operator
+#  expects.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
 ############################################################
 
 
+import os
 import unittest
+from unittest import mock
 
 from anypool import coins
+from anypool.coins.base import MwebPegin, is_positive_decimal
 from tests import vectors
 from tests.test_base58 import DOGE_ADDR, DOGE_HASH160
 
@@ -264,6 +270,110 @@ class TestVersionRolling(unittest.TestCase):
         for symbol in ("KNF", "LTC", "DOGE"):
             self.assertEqual(coins.get_coin(symbol).version_rolling_mask, 0,
                              f"{symbol} must not allow version rolling")
+
+
+
+
+
+
+
+
+class TestMwebPegin(unittest.TestCase):
+
+
+
+
+
+
+    ############################################################
+    # Exactly the coins with MWEB carry peg-in settings — KNF
+    # and LTC; Bitcoin and Dogecoin have neither.
+    ############################################################
+
+    def test_coins_with_mweb_carry_peg_in_settings(self):
+        for symbol, coin in coins.REGISTRY.items():
+            if coin.family != "bitcoin":
+                continue
+            with self.subTest(coin=symbol):
+                self.assertEqual(coin.mweb_pegin is not None, coin.has_mweb)
+        self.assertEqual({symbol for symbol, coin in coins.REGISTRY.items() if getattr(coin, "has_mweb", False)},
+                         {"KNF", "LTC"})
+
+
+
+
+
+
+    ############################################################
+    # The settings come from MWEB_PEGIN_AMOUNT, _WALLET and
+    # _FEE_RATE, trimmed, an empty wallet name meaning none —
+    # and with none of them set, nothing is set.
+    ############################################################
+
+    def test_settings_come_from_the_environment(self):
+        variables = {"MWEB_PEGIN_AMOUNT": " 0.5 ", "MWEB_PEGIN_WALLET": " pool ", "MWEB_PEGIN_FEE_RATE": "10"}
+        with mock.patch.dict(os.environ, variables):
+            self.assertEqual(MwebPegin.from_environment(), MwebPegin("0.5", "pool", "10"))
+
+        with mock.patch.dict(os.environ, {"MWEB_PEGIN_AMOUNT": "1", "MWEB_PEGIN_WALLET": "  "}):
+            self.assertIsNone(MwebPegin.from_environment().wallet)
+
+        with mock.patch.dict(os.environ):
+            for variable in variables:
+                os.environ.pop(variable, None)
+            settings = MwebPegin.from_environment()
+        self.assertEqual(settings, MwebPegin())
+        self.assertFalse(settings.is_set())
+
+
+
+
+
+
+    ############################################################
+    # Valid settings have no problem; each broken one names
+    # the setting to fix.
+    ############################################################
+
+    def test_problems_name_the_setting(self):
+        for settings in (MwebPegin(), MwebPegin("1"), MwebPegin("0.00000001", "pool", "12.5")):
+            with self.subTest(settings=settings):
+                self.assertIsNone(settings.problem())
+
+        cases = [
+            (MwebPegin("0"), "MWEB_PEGIN_AMOUNT"),
+            (MwebPegin("one"), "MWEB_PEGIN_AMOUNT"),
+            (MwebPegin("0.000000001"), "MWEB_PEGIN_AMOUNT"),
+            (MwebPegin("1", fee_rate="-5"), "MWEB_PEGIN_FEE_RATE"),
+            (MwebPegin("1", fee_rate="1.0001"), "MWEB_PEGIN_FEE_RATE"),
+            (MwebPegin(wallet="pool"), "need MWEB_PEGIN_AMOUNT"),
+            (MwebPegin(fee_rate="10"), "need MWEB_PEGIN_AMOUNT"),
+        ]
+        for settings, named in cases:
+            with self.subTest(settings=settings):
+                self.assertIn(named, settings.problem())
+
+
+
+
+
+
+    ############################################################
+    # Positive numbers within the decimal places pass; zero,
+    # negatives, words, empty text, NaN, infinity and anything
+    # finer than the places allow are refused.
+    ############################################################
+
+    def test_positive_decimals(self):
+        for text, places in (("1", 8), ("0.00000001", 8), ("21000000", 8), ("0.5", 8),
+                             ("10", 3), ("12.5", 3), ("0.001", 3)):
+            with self.subTest(text=text, places=places):
+                self.assertTrue(is_positive_decimal(text, places))
+
+        for text, places in (("0", 8), ("-1", 8), ("abc", 8), ("", 8), ("NaN", 8), ("Infinity", 8),
+                             ("0.000000001", 8), ("1.0001", 3), ("1,5", 8)):
+            with self.subTest(text=text, places=places):
+                self.assertFalse(is_positive_decimal(text, places))
 
 
 

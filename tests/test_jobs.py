@@ -3,8 +3,11 @@
 #
 #  Covers families/bitcoin/jobs.py: build_job() must turn
 #  the block 1777 template into exactly the job the pool
-#  broadcast that day, and the JobManager must store, look
-#  up, prune and recognize unchanged work correctly.
+#  broadcast that day — and a real first MWEB block's
+#  template into a job whose merkle branch covers its peg-in
+#  and HogEx — and the JobManager must store, look up, prune
+#  and recognize unchanged work correctly, new MWEB data
+#  counting as new work.
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -14,7 +17,7 @@
 import unittest
 
 from anypool.families.bitcoin.jobs import MAX_STORED_JOBS, JobManager, build_job, stratum_prevhash
-from tests import vectors
+from tests import mweb_vectors, vectors
 
 
 
@@ -90,6 +93,27 @@ class TestBuildJob(unittest.TestCase):
 
 
 
+    ############################################################
+    # The real first MWEB block: the coinbase's merkle branch
+    # starts at the peg-in and folds in the HogEx above it —
+    # the template's transactions, the HogEx last, all count.
+    ############################################################
+
+    def test_first_mweb_block_branch_covers_peg_in_and_hogex(self):
+        template = mweb_vectors.FIRST_MWEB_BLOCK["template"]
+
+        job = build_job(template, "0000000a")
+
+        self.assertEqual(job["height"], 432)
+        self.assertEqual(len(job["merkle_branch"]), 2)
+        self.assertEqual(job["merkle_branch"][0], bytes.fromhex(mweb_vectors.PEGIN_TXID)[::-1].hex())
+        self.assertIs(job["template"], template)
+
+
+
+
+
+
 
 
 class TestJobManager(unittest.TestCase):
@@ -151,6 +175,25 @@ class TestJobManager(unittest.TestCase):
 
         # A changed network target must NOT count as the same work
         self.assertFalse(manager.is_same_work(vectors.TEMPLATE, network_target - 1))
+
+
+
+
+
+
+    ############################################################
+    # On an MWEB chain the tip can stay while the MWEB data
+    # changes (an MWEB transaction arrives): that is new work.
+    ############################################################
+
+    def test_new_mweb_data_is_new_work(self):
+        template = mweb_vectors.NEXT_MWEB_BLOCK["template"]
+        manager = JobManager()
+        manager.store(build_job(template, manager.next_job_id()))
+        network_target = int(template["target"], 16)
+
+        self.assertTrue(manager.is_same_work(dict(template), network_target))
+        self.assertFalse(manager.is_same_work(dict(template, mweb=template["mweb"] + "00"), network_target))
 
 
 

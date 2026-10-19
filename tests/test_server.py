@@ -16,7 +16,8 @@
 #
 #  The winning share is the real KNF block 1777 vector, so
 #  the block handed to the fake node is asserted against the
-#  byte-exact serialization the network accepted.
+#  byte-exact serialization the network accepted (less the
+#  lone MWEB marker byte the pool used to append to it).
 #
 #  Used by:
 #    - unittest discovery (run inside the stratum container)
@@ -41,15 +42,17 @@ from tests import vectors
 # FakeNodeRPC
 ############################################################
 #
-# Stands in for node/rpc.py's NodeRPC. Records every call,
-# answers getblocktemplate from `template`, and answers
-# submitblock from the `submit_results` queue (empty queue
-# means None — block accepted). Setting `gate` makes
+# Stands in for node/rpc.py's NodeRPC. Records every call
+# (and the wallet it was routed to), answers getblocktemplate
+# from `template`, submitblock from the `submit_results` queue
+# (empty queue means None — block accepted) and any other
+# method from its entry in `answers`. Setting `gate` makes
 # submitblock hang until the event fires, simulating a node
 # that is busy connecting the previous block.
 #
 # Used by:
 #   - tests/test_server.py — every test case
+#   - tests/test_job_freshness.py, test_mweb_activation.py
 ############################################################
 
 class FakeNodeRPC:
@@ -60,14 +63,17 @@ class FakeNodeRPC:
 
 
     ############################################################
-    # Starts with no template, no queued verdicts, no gate.
+    # Starts with no template, no queued verdicts, no gate and
+    # no answers for any other call.
     ############################################################
 
     def __init__(self):
         self.calls = []
+        self.wallets = []
         self.template = None
         self.submit_results = []
         self.gate = None
+        self.answers = {}
 
 
 
@@ -77,18 +83,39 @@ class FakeNodeRPC:
     ############################################################
     # The NodeRPC.call() signature, answered from the fields:
     # submitblock waits on `gate` (when set) then pops a
-    # queued verdict; getblocktemplate returns `template`.
+    # queued verdict; getblocktemplate answers `template`, any
+    # other method its entry in `answers`. An answer that is
+    # an exception is raised; one that is callable is called
+    # with the call's parameters first — how a test lets a
+    # peg-in change the template the node serves next.
     ############################################################
 
-    async def call(self, method, params=None, timeout=10.0):
+    async def call(self, method, params=None, timeout=10.0, wallet=None):
         self.calls.append((method, params))
+        self.wallets.append((method, wallet))
         if method == "submitblock":
             if self.gate is not None:
                 await self.gate.wait()
             return self.submit_results.pop(0) if self.submit_results else None
-        if method == "getblocktemplate":
-            return self.template
-        return None
+
+        answer = self.template if method == "getblocktemplate" else self.answers.get(method)
+        if callable(answer):
+            answer = answer(params)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+
+
+
+
+
+    ############################################################
+    # The parameters of every call to one method, in order.
+    ############################################################
+
+    def calls_to(self, method):
+        return [params for (name, params) in self.calls if name == method]
 
 
 
@@ -255,9 +282,10 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
 
     ############################################################
-    # The background submission must hand the node the exact
-    # serialization the network accepted for block 1777:
-    # header + tx count + full coinbase + MWEB marker.
+    # The background submission must hand the node block 1777
+    # as the network accepted it: header + tx count + full
+    # coinbase — without the lone MWEB marker byte the pool
+    # used to append, which a pre-MWEB block never carries.
     ############################################################
 
     async def test_submitted_block_is_byte_exact(self):
@@ -268,7 +296,7 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
 
         expected_coinbase = (job["coinb1_full"] + vectors.EXTRANONCE1 +
                              vectors.EXTRANONCE2 + job["coinb2_full"])
-        expected_block = vectors.HEADER_HEX + "01" + expected_coinbase + "01"
+        expected_block = vectors.HEADER_HEX + "01" + expected_coinbase
 
         self.assertTrue(accepted)
         self.assertEqual(server.rpc.submitted_blocks(), [expected_block])
@@ -305,7 +333,9 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
     ############################################################
     # After the node accepts our block, the follow-up job must
     # be cut right away (submitblock returns only once the tip
-    # moved) — not seconds later when a poll comes around.
+    # moved) — not seconds later when a poll comes around. The
+    # new tip then has the MWEB watch read the deployment
+    # state, in the background and after the job is cut.
     ############################################################
 
     async def test_accepted_block_cuts_new_job_immediately(self):
@@ -317,7 +347,7 @@ class TestBackgroundBlockSubmission(unittest.IsolatedAsyncioTestCase):
         await drain(server)
 
         self.assertEqual([method for method, _ in server.rpc.calls],
-                         ["submitblock", "getblocktemplate"])
+                         ["submitblock", "getblocktemplate", "getblockchaininfo"])
 
         new_job = server.job_manager.current_job
         self.assertNotEqual(new_job["job_id"], job["job_id"])

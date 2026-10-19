@@ -1,14 +1,17 @@
 ############################################################
 #  [*] Pool Configuration
 #
-#  Every knob of the pool lives here and nowhere else. All
-#  values are read from environment variables once, at import
-#  time, so the rest of the codebase can simply do
-#  `from anypool import config` and use plain attributes.
+#  Every pool-wide knob lives here. All values are read from
+#  environment variables once, at import time, so the rest of
+#  the codebase can simply do `from anypool import config`
+#  and use plain attributes.
 #
 #  Per-coin properties (PoW function, address prefixes, GBT
 #  rules, ...) do NOT live here — see the anypool/coins/
-#  package. This module only knows WHICH coin was selected.
+#  package — and neither do the knobs only some coins have:
+#  the MWEB peg-in settings belong to the coins with MWEB
+#  (MwebPegin in coins/base.py). This module only knows WHICH
+#  coin was selected.
 #
 #  validate() should be called once on startup: it fails fast
 #  with a clear message instead of letting a missing reward
@@ -113,9 +116,14 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 # that the selected coin/network exists in the coin registry
 # and that REWARD_ADDR is set and carries the right prefix,
 # so a misconfigured pool dies immediately with a readable
-# error instead of failing on the first block template.
+# error instead of failing on the first block template. The
+# coin's own settings are held to the same standard: a coin
+# with MWEB judges its peg-in settings itself, and peg-in
+# settings given for a coin without MWEB would do nothing,
+# so they stop the pool rather than leave the operator
+# believing a peg-in is set up.
 #
-# (The anypool.coins import is deliberately local — coins
+# (The anypool.coins imports are deliberately local — coins
 # imports config, so a module-level import would be a cycle.)
 #
 # Used by:
@@ -124,6 +132,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 def validate() -> None:
     from anypool import coins
+    from anypool.coins.base import MwebPegin
 
     if COIN not in coins.REGISTRY:
         raise SystemExit(f"[CONFIG] Unknown COIN '{COIN}'. Supported: {list(coins.REGISTRY.keys())}")
@@ -143,3 +152,9 @@ def validate() -> None:
         coin.address_scheme.validate_address(REWARD_ADDR, COIN_NETWORK)
     except ValueError as e:
         raise SystemExit(f"[CONFIG] REWARD_ADDR '{REWARD_ADDR}' is not a valid {COIN} {COIN_NETWORK} address: {e}")
+
+    pegin = getattr(coin, "mweb_pegin", None)
+    if pegin is None and MwebPegin.from_environment().is_set():
+        raise SystemExit(f"[CONFIG] MWEB_PEGIN_* is set, but {COIN} has no MWEB")
+    if pegin is not None and pegin.problem():
+        raise SystemExit(f"[CONFIG] {pegin.problem()}")

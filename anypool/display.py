@@ -16,11 +16,14 @@
 #      DEBUG env variable is true, via debug_box().
 #
 #  Bitcoin-family panels take stratum-v1-shaped jobs; the
-#  cn_* variants below render the same operator story for the
+#  mweb_* panels tell the MWEB activation story (deployment
+#  state, the first-MWEB-block stall, the peg-in); the cn_*
+#  variants below render the same operator story for the
 #  CryptoNote family (per-client jobs, blob-based shares).
 #
 #  Used by:
-#    - families/bitcoin/  — job/broadcast/share panels
+#    - families/bitcoin/  — job/broadcast/share panels, and
+#                           the mweb_* panels from mweb.py
 #    - families/cryptonote/ — the cn_* panels
 #    - both families      — startup_banner, new_block_panel,
 #                           debug_box
@@ -28,7 +31,7 @@
 
 
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pyboxen import boxen
 
@@ -297,6 +300,162 @@ def share_result_panel(is_accepted: bool, is_block: bool, job_id: str, height: i
             "\n".join(to_print),
             title=f"{timestamp()} - Mined share validation result 👷  👷  👷 ",
             color="green" if is_accepted else "red",
+            padding=1,
+        )
+    )
+
+
+
+
+
+
+
+
+############################################################
+# mweb_status_panel
+############################################################
+#
+# Announces a new state of the MWEB deployment: the status,
+# the height it began at, the signalling tally while blocks
+# are signalling, and the height of the first MWEB block once
+# it can be told. While that first block is still ahead the
+# panel turns yellow and says what it needs — a peg-in in the
+# node's mempool — and whether the pool will send one itself.
+#
+# Used by:
+#   - families/bitcoin/mweb.py — MwebWatch.observe()
+############################################################
+
+def mweb_status_panel(state: Dict, activation_height: Optional[int], next_height: int,
+                      pegin_amount: str) -> None:
+
+    to_print = ["Status:".ljust(25) + state["status"]]
+    if state["since"] is not None:
+        to_print.append("Since height:".ljust(25) + str(state["since"]))
+    if state["count"] is not None and state["elapsed"] is not None:
+        needed = f" (lock-in needs {state['threshold']} of {state['period']})" if state["threshold"] else ""
+        to_print.append("Signalling:".ljust(25) + f"{state['count']} of {state['elapsed']} blocks this period{needed}")
+    if activation_height is not None:
+        to_print.append("First MWEB block:".ljust(25) + f"height {activation_height}")
+
+    first_block_ahead = (state["status"] in ("locked_in", "active")
+                         and (activation_height is None or next_height <= activation_height))
+    if first_block_ahead:
+        to_print.append("")
+        to_print.append("The first MWEB block can only be built once a peg-in transaction")
+        to_print.append("waits in the node's mempool: its HogEx has nothing else to spend.")
+        if pegin_amount:
+            to_print.append(f"The pool will peg in {pegin_amount} from the node's wallet when the chain gets there.")
+        else:
+            to_print.append("Set MWEB_PEGIN_AMOUNT to let the pool do it, or peg in by hand then.")
+
+    print()
+    print(
+        boxen(
+            "\n".join(to_print),
+            title=f"{timestamp()} - MWEB deployment: {state['status']}",
+            color="yellow" if first_block_ahead else "green",
+            padding=1,
+        )
+    )
+
+
+
+
+
+
+
+
+############################################################
+# mweb_stall_panel
+############################################################
+#
+# The red alarm for a chain stuck in front of its first MWEB
+# block: which block, the tip it waits on, what the node said,
+# and what happens next — the pool's own peg-in when one is
+# configured, the manual remedy otherwise, or, when a peg-in
+# went out and the node still refuses, a pointer at its fee.
+#
+# Used by:
+#   - families/bitcoin/mweb.py — MwebWatch.diagnose()
+############################################################
+
+def mweb_stall_panel(height: int, tip_hash: str, error: Exception, pegin_amount: str,
+                     pegin_txid: Optional[str]) -> None:
+
+    to_print = [
+        f"Block {height} is this chain's first MWEB block. The node can only build it",
+        "once a peg-in transaction waits in its mempool (the HogEx has no other",
+        "input), so every block template is refused and mining has stopped.",
+        "",
+        "Waiting on tip:".ljust(25) + tip_hash,
+        "Node said:".ljust(25) + str(error)[:200],
+        "",
+    ]
+
+    if pegin_txid:
+        to_print.append("Peg-in already sent:".ljust(25) + pegin_txid)
+        to_print.append("The node still refuses the block: check that the peg-in pays enough fee.")
+    elif pegin_amount:
+        to_print.append(f"The pool now pegs in {pegin_amount} from the node's wallet (MWEB_PEGIN_AMOUNT).")
+    else:
+        to_print.append("To continue, send any amount to an MWEB address of a wallet on this node")
+        to_print.append("(getnewaddress with address type mweb, then sendtoaddress to it),")
+        to_print.append("or set MWEB_PEGIN_AMOUNT so the pool does it.")
+
+    print()
+    print(
+        boxen(
+            "\n".join(to_print),
+            title=f"{timestamp()} - Mining stopped before the first MWEB block  ⛔  ⛔  ⛔ ",
+            color="red",
+            padding=1,
+        )
+    )
+
+
+
+
+
+
+
+
+############################################################
+# mweb_pegin_panel
+############################################################
+#
+# The outcome of the pool's own peg-in: the txid the first
+# MWEB block's HogEx will spend, or the node's refusal with a
+# hint at the fix (no wallet, no coins, no fee estimate) — the
+# pool tries again a little later.
+#
+# Used by:
+#   - families/bitcoin/mweb.py — MwebWatch.diagnose()
+############################################################
+
+def mweb_pegin_panel(height: int, amount: str, txid: Optional[str], error: Optional[Exception],
+                     hint: Optional[str]) -> None:
+
+    to_print = ["Amount:".ljust(25) + amount]
+
+    if txid:
+        to_print.append("Peg-in txid:".ljust(25) + txid)
+        to_print.append("")
+        to_print.append(f"Block {height}, the first MWEB block, can now be built.")
+    else:
+        to_print.append("Node said:".ljust(25) + str(error)[:200])
+        if hint:
+            to_print.append("")
+            to_print.append(hint)
+        to_print.append("")
+        to_print.append("The pool tries again a little later.")
+
+    print()
+    print(
+        boxen(
+            "\n".join(to_print),
+            title=f"{timestamp()} - MWEB peg-in {'sent' if txid else 'failed'} for block {height}",
+            color="green" if txid else "red",
             padding=1,
         )
     )

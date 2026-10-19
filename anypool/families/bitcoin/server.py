@@ -21,6 +21,11 @@
 #                        task, so the miner's submit response
 #                        NEVER waits on a node round-trip.
 #
+#  On coins with MWEB an MwebWatch (mweb.py) rides along: it
+#  reports the deployment's state after every new tip and
+#  takes over when the node refuses the template in front of
+#  the chain's first MWEB block.
+#
 #  Per-connection protocol handling lives in connection.py;
 #  this module never parses stratum messages itself.
 #
@@ -36,6 +41,7 @@ from anypool import coins, config, display
 from anypool.crypto.hashing import reverse_hex, reverse_hex_4b_chunks, sha256d
 from anypool.families.bitcoin.blocks import assemble_block
 from anypool.families.bitcoin.jobs import JobManager, build_job
+from anypool.families.bitcoin.mweb import MwebWatch
 from anypool.families.bitcoin.shares import build_header, ntime_within_range
 from anypool.node.rpc import NodeRPC
 from anypool.stratum.base import BasePoolServer
@@ -63,6 +69,11 @@ MAX_SUBMITTED_PARENTS = 50
 # hours) the tip alone would never trigger a new job.
 JOB_NTIME_REFRESH_SECONDS = 30
 
+# What _fetch_template() hands back while the chain waits in
+# front of its first MWEB block: create_job() then returns
+# quietly, the MWEB watch having told the operator already
+MWEB_STALL = object()
+
 
 
 
@@ -81,9 +92,10 @@ class StratumServer(BasePoolServer):
     # __init__
     ############################################################
     #
-    # Wires up the RPC client and JobManager, zeroes the stats,
-    # derives the initial pool target from POOL_DIFFICULTY and
-    # prints the startup banner.
+    # Wires up the RPC client, the JobManager and — for coins
+    # with MWEB — the MwebWatch, zeroes the stats, derives the
+    # initial pool target from POOL_DIFFICULTY and prints the
+    # startup banner.
     #
     # Used by:
     #   - families/bitcoin/runner.py — run(), once at startup
@@ -94,6 +106,7 @@ class StratumServer(BasePoolServer):
 
         self.rpc = NodeRPC()
         self.job_manager = JobManager()
+        self.mweb = MwebWatch() if coins.active().has_mweb else None
 
         # Difficulty / target state (network side is learned
         # from the first block template)
@@ -237,17 +250,20 @@ class StratumServer(BasePoolServer):
     # The job pipeline, run at startup and then every few
     # seconds by the refresh loop in runner.py:
     #
-    #   1. getblocktemplate from the node.
+    #   1. getblocktemplate from the node (_fetch_template).
     #   2. If it describes the work we are already mining
     #      (same tip / mweb / target), keep the current job —
     #      miners hate pointless restarts.
     #   3. Otherwise refresh the difficulty/target state
     #      (optionally dropping pool difficulty to network
-    #      difficulty, see POLL_DIFF_DROPPER).
+    #      difficulty, see POLL_DIFF_DROPPER); on a new tip the
+    #      MWEB watch reads the deployment state in the
+    #      background.
     #   4. Build, store and broadcast the new job.
     #
     # Returns the current job, or None when the node call or
-    # job construction failed (the refresh loop just retries).
+    # job construction failed (the refresh loop just retries)
+    # or the chain waits in front of its first MWEB block.
     #
     # Used by:
     #   - families/bitcoin/runner.py — run() (initial job),
@@ -260,9 +276,12 @@ class StratumServer(BasePoolServer):
     async def create_job(self) -> Dict:
         try:
             # STEP 1: fetch a fresh block template (request per
-            # coin definition)
-            # =================================================
-            template = await self.rpc.call("getblocktemplate", coins.active().gbt_request())
+            # coin definition) — or nothing while the chain waits
+            # in front of its first MWEB block
+            # ===================================================
+            template = await self._fetch_template()
+            if template is MWEB_STALL:
+                return None
             if not template or "previousblockhash" not in template:
                 print(f"[ERROR] Invalid block template: {template}")
                 return None
@@ -296,6 +315,8 @@ class StratumServer(BasePoolServer):
 
             if not same_work:
                 display.new_block_panel(template["height"] - 1, template["previousblockhash"])
+                if self.mweb is not None:
+                    self._spawn(self.mweb.observe(self.rpc))
 
 
             # STEP 4: build, store and broadcast the new job.
@@ -337,6 +358,41 @@ class StratumServer(BasePoolServer):
         except Exception as e:
             print(f"[ERROR] Failed to create job: {e}")
             return None
+
+
+
+
+
+
+    ############################################################
+    # _fetch_template
+    ############################################################
+    #
+    # One getblocktemplate call. On coins with MWEB a refusal
+    # goes to the MWEB watch first: when the next block is the
+    # chain's first MWEB block, the watch explains the stall and
+    # may peg coins in. After its peg-in the template is asked
+    # for again at once; while the stall lasts MWEB_STALL comes
+    # back instead of an error on every poll. Any other failure
+    # is raised to create_job() as before.
+    #
+    # Used by:
+    #   - create_job() (above)
+    ############################################################
+
+    async def _fetch_template(self):
+        request = coins.active().gbt_request()
+        try:
+            return await self.rpc.call("getblocktemplate", request)
+        except Exception as error:
+            if self.mweb is None:
+                raise
+            verdict = await self.mweb.diagnose(self.rpc, error)
+            if verdict == "unstuck":
+                return await self.rpc.call("getblocktemplate", request)
+            if verdict == "stalled":
+                return MWEB_STALL
+            raise
 
 
 
@@ -584,8 +640,7 @@ class StratumServer(BasePoolServer):
                             header_hex: str) -> bool:
         try:
             print("[SUBMIT] Building block for submission...")
-            complete_block = assemble_block(job, extra_nonce1, extra_nonce2, header_hex,
-                                            has_mweb=coins.active().has_mweb)
+            complete_block = assemble_block(job, extra_nonce1, extra_nonce2, header_hex)
 
             print("[SUBMIT] Submitting to network...")
             result = await self.rpc.call("submitblock", [complete_block])

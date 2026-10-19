@@ -8,7 +8,7 @@
 #    | tx count (varint)
 #    | coinbase tx (FULL serialization, with witness)
 #    | every template transaction, verbatim ("data" field)
-#    | MWEB extension block, when the template carries one
+#    | MWEB section, when the template carries one
 #
 #  Note the coinbase difference from share validation: the
 #  merkle tree was computed over the witness-less txid form,
@@ -45,17 +45,24 @@ from anypool.families.bitcoin.coinbase import to_varint
 # produce a corrupt block the first time a template carries
 # more transactions than that.
 #
-# The MWEB tail (marker byte + optional extension data) is
-# Litecoin-family serialization and is only appended when the
-# coin declares has_mweb — on a plain Bitcoin Core fork like
-# Dogecoin that extra byte would make every block malformed.
+# The MWEB section follows the node's own serialization: a
+# Litecoin-family node reads it only after a block whose last
+# transaction is the HogEx, as a 0x01 marker and then the
+# extension block — and the template carries "mweb" data
+# exactly for such blocks, the HogEx being its last
+# transaction. So the section is written exactly when the
+# template has MWEB data, on any chain and from whatever
+# height MWEB activates there; before activation, and on
+# coins without MWEB, the block ends after its transactions.
+# MWEB data without a single template transaction to be its
+# HogEx is a template no node would accept a block for, and
+# is refused here instead.
 #
 # Used by:
 #   - families/bitcoin/server.py — _submit_block()
 ############################################################
 
-def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: str,
-                   has_mweb: bool) -> str:
+def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: str) -> str:
 
     # Coinbase in FULL (witness) serialization for the block body
     coinbase_full_hex = job["coinb1_full"] + extra_nonce1 + extra_nonce2 + job["coinb2_full"]
@@ -72,10 +79,13 @@ def assemble_block(job: Dict, extra_nonce1: str, extra_nonce2: str, header_hex: 
     tx_count = to_varint(len(all_txs) + 1)
 
 
-    # MWEB tail (Litecoin-family only): marker byte, then the
-    # extension data when the template carries any
-    if has_mweb:
-        mweb_part = "01" + job["template"].get("mweb", "")
+    # MWEB section: marker byte, then the extension block — only
+    # behind the HogEx the template ends with
+    mweb_hex = job["template"].get("mweb")
+    if mweb_hex:
+        if not all_txs:
+            raise ValueError("block template carries MWEB data but no HogEx transaction")
+        mweb_part = "01" + mweb_hex
     else:
         mweb_part = ""
 

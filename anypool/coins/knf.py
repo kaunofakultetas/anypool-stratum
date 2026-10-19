@@ -2,8 +2,9 @@
 #  [*] Coin — KNF (KnfCoin)
 #
 #  KnfCoin is a Litecoin fork, so it inherits Scrypt PoW,
-#  Litecoin's difficulty-1 target, native segwit addresses
-#  and the segwit + mweb template rules — only the address
+#  Litecoin's difficulty-1 target, native segwit addresses,
+#  the segwit + mweb template rules and MWEB itself, with the
+#  operator's MWEB peg-in settings — only the address
 #  prefixes differ.
 #
 #  Used by:
@@ -12,7 +13,7 @@
 
 
 from anypool.coins.address import Bech32P2WPKH
-from anypool.coins.base import CoinDefinition
+from anypool.coins.base import CoinDefinition, MwebPegin
 from anypool.crypto.hashing import scrypt_pow_hash
 
 
@@ -27,4 +28,5 @@ KNF = CoinDefinition(
         "testnet": "tknf",
     }),
     has_mweb=True,
+    mweb_pegin=MwebPegin.from_environment(),
 )
